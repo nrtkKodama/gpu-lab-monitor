@@ -51,7 +51,7 @@ pip3 install fastapi uvicorn
 ```
 
 #### 2. エージェントスクリプトの作成
-リポジトリに含まれている `monitor.py` を使用するか、以下の内容で作成してください。
+リポジトリに含まれている `monitor.py` を使用するか、以下の内容で`/opt/gpu-monitor/monitor.py`を作成してください。
 このスクリプトは `nvidia-smi` のエラーハンドリングと、Dockerコンテナとの紐付けを行います。
 
 **ファイル: `monitor.py`**
@@ -227,7 +227,7 @@ After=network.target docker.service
 [Service]
 User=root
 WorkingDirectory=/opt/gpu-monitor
-ExecStart=/usr/local/bin/uvicorn monitor:app --host 0.0.0.0 --port 8000
+ExecStart=uvicorn monitor:app --host 0.0.0.0 --port 8000
 Restart=always
 
 [Install]
