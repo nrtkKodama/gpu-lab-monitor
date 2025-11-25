@@ -36,6 +36,11 @@ export interface ServerNode {
   gpus: GPUInfo[];
 }
 
+export interface ServerConfig {
+  name: string;
+  ip: string;
+}
+
 export enum ViewState {
   DASHBOARD = 'DASHBOARD',
   DETAIL = 'DETAIL',

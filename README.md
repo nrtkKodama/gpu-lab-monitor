@@ -52,6 +52,7 @@ pip3 install fastapi uvicorn
 
 #### 2. エージェントスクリプトの作成
 適当な場所（例: `/opt/gpu-monitor`）を作成し、以下のスクリプトを `monitor.py` として保存します。
+**このスクリプトは nvidia-smi が「N/A」を返した場合でもクラッシュしないように対策されています。**
 
 **ファイル: `/opt/gpu-monitor/monitor.py`**
 
@@ -73,19 +74,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def safe_int(val):
+    """'40 MiB', '[N/A]', 'Error' などを安全にintに変換"""
+    try:
+        # "40 MiB" -> "40"
+        cleaned = str(val).split()[0].strip()
+        return int(float(cleaned))
+    except:
+        return 0
+
+def safe_float(val):
+    """'45.5 W' などを安全にfloatに変換"""
+    try:
+        cleaned = str(val).split()[0].strip()
+        return float(cleaned)
+    except:
+        return 0.0
+
 def get_docker_map():
-    """
-    実行中のDockerコンテナのPIDとメタデータをマッピングする辞書を作成
-    Returns: {pid: {name: str, user: str, image: str}}
-    """
+    """実行中のDockerコンテナのPIDとメタデータをマッピング"""
     docker_map = {}
     try:
-        # 実行中の全コンテナのPID, 名前, Image, Config.Userを取得
         cmd = ["docker", "ps", "-q"]
         container_ids = subprocess.check_output(cmd).decode().split()
-        
-        if not container_ids:
-            return {}
+        if not container_ids: return {}
 
         inspect_cmd = ["docker", "inspect", "--format", "{{.State.Pid}},{{.Name}},{{.Config.User}},{{.Config.Image}}"] + container_ids
         output = subprocess.check_output(inspect_cmd).decode()
@@ -94,76 +106,49 @@ def get_docker_map():
             if not line.strip(): continue
             parts = line.split(',')
             if len(parts) >= 4:
-                pid = int(parts[0])
-                name = parts[1].strip().lstrip('/') # 先頭の/を除去
-                user = parts[2].strip()
+                pid = safe_int(parts[0])
+                name = parts[1].strip().lstrip('/')
+                user = parts[2].strip() or "root"
                 image = parts[3].strip()
-                
-                # ユーザーが空ならrootとする、またはイメージ名などをヒントにする
-                if not user: user = "root"
-                
-                docker_map[pid] = {
-                    "containerName": name,
-                    "user": user,
-                    "image": image
-                }
+                docker_map[pid] = {"containerName": name, "user": user, "image": image}
     except Exception as e:
         print(f"Docker info fetch error: {e}")
-    
     return docker_map
 
 def get_gpu_processes():
-    """
-    nvidia-smiからプロセス情報を取得し、Docker情報と結合する
-    """
+    """nvidia-smiからプロセス情報を取得し、Docker情報と結合"""
     processes = []
     docker_map = get_docker_map()
 
     try:
-        # PID, Process Name, Used Memory
         cmd = ["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"]
         output = subprocess.check_output(cmd).decode()
         
         for line in output.splitlines():
             if not line.strip(): continue
             parts = line.split(',')
-            pid = int(parts[0])
+            pid = safe_int(parts[0])
             proc_name = parts[1].strip()
-            mem_used = int(parts[2])
+            mem_used = safe_int(parts[2])
             
-            # Dockerコンテナ内のプロセスかチェック
-            # 正確にはプロセスの親PIDを辿る必要があるが、簡易的にPID直接一致またはcgroup確認が一般的
-            # ここでは簡易実装としてPIDマッピングを使用 (※実際はPID Namespaceの違いによりホストPIDと異なる場合があるため注意)
-            # より確実にするには /proc/{pid}/cgroup を読む必要がありますが、ここでは簡略化しています。
-            
-            # ホスト側PIDで見つかった場合
             container_info = docker_map.get(pid)
-            
-            user = "system"
-            container_name = None
-            
-            if container_info:
-                user = container_info['user']
-                container_name = container_info['containerName']
+            user = container_info['user'] if container_info else "system"
+            container_name = container_info['containerName'] if container_info else None
             
             processes.append({
                 "pid": pid,
-                "type": "C", # Compute
+                "type": "C",
                 "processName": proc_name,
                 "usedMemory": mem_used,
                 "user": user,
                 "containerName": container_name
             })
-            
-    except Exception as e:
-        # プロセスがない場合など
-        pass
-        
+    except Exception:
+        pass # プロセスがない場合
     return processes
 
 @app.get("/metrics")
 def metrics():
-    # 1. GPU基本情報の取得
     try:
         cmd = [
             "nvidia-smi",
@@ -177,29 +162,28 @@ def metrics():
         all_processes = get_gpu_processes()
 
         for row in reader:
-            index = int(row[0])
+            if len(row) < 10: continue
             
-            # このGPUに関連するプロセスだけをフィルタリング（簡易実装: 本来はgpu_uuid等で紐付けが必要）
-            # ここでは全プロセスをリストに入れていますが、実運用では `nvidia-smi query-compute-apps` に `gpu_index` を含めてフィルタしてください
-            
+            # 安全にパース
+            index = safe_int(row[0])
+            name = row[1].strip()
+            util_gpu = safe_int(row[2])
+            util_mem = safe_int(row[3])
+            mem_total = safe_int(row[4])
+            mem_used = safe_int(row[5])
+            mem_free = safe_int(row[6])
+            temp = safe_int(row[7])
+            power_draw = safe_int(row[8]) # Wattは整数表示で十分
+            power_limit = safe_int(row[9])
+
             gpus.append({
                 "index": index,
-                "name": row[1].strip(),
-                "utilization": {
-                    "gpu": int(row[2]),
-                    "memory": int(row[3])
-                },
-                "memory": {
-                    "total": int(row[4]),
-                    "used": int(row[5]),
-                    "free": int(row[6])
-                },
-                "temperature": int(row[7]),
-                "power": {
-                    "draw": float(row[8]),
-                    "limit": float(row[9])
-                },
-                "processes": all_processes # ※簡略化のため全プロセスを返しています
+                "name": name,
+                "utilization": {"gpu": util_gpu, "memory": util_mem},
+                "memory": {"total": mem_total, "used": mem_used, "free": mem_free},
+                "temperature": temp,
+                "power": {"draw": power_draw, "limit": power_limit},
+                "processes": all_processes
             })
             
         return {"status": "online", "gpus": gpus}
@@ -209,7 +193,6 @@ def metrics():
 
 if __name__ == "__main__":
     import uvicorn
-    # ポート8000で全IPからの接続を待機
     uvicorn.run(app, host="0.0.0.0", port=8000)
 ```
 
@@ -258,23 +241,9 @@ sudo systemctl start gpu-monitor
 npm install
 ```
 
-#### 2. モードの切り替え（重要）
-デフォルトではデモ用のダミーデータが表示されるようになっています。
-**実際のサーバーと通信するために、以下のファイルを編集してください。**
-
-ファイル: `services/mockData.ts`
-
-```typescript
-// services/mockData.ts の末尾 (115行目付近)
-
-// 変更前:
-export const fetchServerData = fetchMockServerData;
-// export const fetchServerData = fetchRealServerData;
-
-// 変更後（コメントアウトを入れ替える）:
-// export const fetchServerData = fetchMockServerData;
-export const fetchServerData = fetchRealServerData;
-```
+#### 2. モード設定について
+デフォルト設定では「実サーバーモード」になっています。
+すでに Python エージェントを起動していれば、設定変更なしで動作します。
 
 #### 3. アプリの起動
 開発モードで起動します。
@@ -296,7 +265,7 @@ npm start
 研究室内のWebサーバー（nginxやApache）にビルドしたファイルを配置します。
 ```bash
 npm run build
-# build/ フォルダの中身をドキュメントルートへコピー
+# build/ (または dist/) フォルダの中身をドキュメントルートへコピー
 ```
 ※ 同じLAN内であればHTTP同士で通信できるため、トラブルが少ない最も推奨される方法です。
 

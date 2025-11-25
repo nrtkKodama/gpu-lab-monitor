@@ -1,40 +1,58 @@
 import React, { useState, useEffect } from 'react';
-import { ServerNode, ViewState } from './types';
+import { ServerNode, ViewState, ServerConfig } from './types';
 import { fetchServerData, scanLocalNetwork } from './services/mockData';
 import ServerCard from './components/ServerCard';
 import ServerDetail from './components/ServerDetail';
 import HelpGuide from './components/HelpGuide';
-import { LayoutDashboard, Plus, Network, HelpCircle } from 'lucide-react';
+import { LayoutDashboard, Plus, Network, HelpCircle, HardDrive } from 'lucide-react';
 
 const App: React.FC = () => {
   // Persistence: Load servers from localStorage on boot
-  const [servers, setServers] = useState<ServerNode[]>([]);
-  const [savedIPs, setSavedIPs] = useState<string[]>(() => {
-    const saved = localStorage.getItem('gpu_lab_monitor_ips');
-    return saved ? JSON.parse(saved) : ['192.168.1.100', '192.168.1.102']; // Defaults
+  const [savedServers, setSavedServers] = useState<ServerConfig[]>(() => {
+    try {
+      const saved = localStorage.getItem('gpu_lab_monitor_ips');
+      if (!saved) return [];
+      
+      const parsed = JSON.parse(saved);
+      // Migration logic: convert old string[] to ServerConfig[]
+      if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'string') {
+        return parsed.map((ip: string, idx: number) => ({
+          name: `Node-${idx + 1}`,
+          ip: ip
+        }));
+      }
+      return parsed;
+    } catch (e) {
+      console.error("Failed to parse saved servers", e);
+      return [];
+    }
   });
 
+  const [servers, setServers] = useState<ServerNode[]>([]);
   const [viewState, setViewState] = useState<ViewState>(ViewState.DASHBOARD);
   const [selectedServer, setSelectedServer] = useState<ServerNode | null>(null);
   const [isScanning, setIsScanning] = useState(false);
+  
+  // Add Server Form State
   const [newIp, setNewIp] = useState('');
+  const [newName, setNewName] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
-  // Effect to sync savedIPs to localStorage
+  // Effect to sync savedServers to localStorage
   useEffect(() => {
-    localStorage.setItem('gpu_lab_monitor_ips', JSON.stringify(savedIPs));
+    localStorage.setItem('gpu_lab_monitor_ips', JSON.stringify(savedServers));
     refreshAllData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedIPs]);
+  }, [savedServers]);
 
   // Periodic refresh
   useEffect(() => {
     const interval = setInterval(refreshAllData, 30000); // 30s auto refresh
     return () => clearInterval(interval);
-  }, [savedIPs]);
+  }, [savedServers]);
 
   const refreshAllData = async () => {
-    const promises = savedIPs.map((ip, idx) => fetchServerData(ip, `Lab-Node-${idx + 1}`));
+    const promises = savedServers.map((config) => fetchServerData(config.ip, config.name));
     const results = await Promise.all(promises);
     setServers(results);
     
@@ -46,16 +64,24 @@ const App: React.FC = () => {
   };
 
   const handleAddServer = () => {
-    if (newIp && !savedIPs.includes(newIp)) {
-      setSavedIPs([...savedIPs, newIp]);
+    if (newIp) {
+      // Check for duplicates
+      if (savedServers.some(s => s.ip === newIp)) {
+        alert("このIPアドレスは既に登録されています。");
+        return;
+      }
+      
+      const name = newName.trim() || `Server-${newIp.split('.').pop()}`;
+      setSavedServers([...savedServers, { name, ip: newIp }]);
       setNewIp('');
+      setNewName('');
       setShowAddModal(false);
     }
   };
 
   const handleRemoveServer = (ip: string) => {
     if (confirm(`${ip} を監視リストから削除しますか？`)) {
-      setSavedIPs(savedIPs.filter(s => s !== ip));
+      setSavedServers(savedServers.filter(s => s.ip !== ip));
     }
   };
 
@@ -63,10 +89,13 @@ const App: React.FC = () => {
     setIsScanning(true);
     try {
       const foundIps = await scanLocalNetwork();
-      const uniqueNew = foundIps.filter(ip => !savedIPs.includes(ip));
+      const existingIps = savedServers.map(s => s.ip);
+      const uniqueNew = foundIps.filter(ip => !existingIps.includes(ip));
+      
       if (uniqueNew.length > 0) {
         if (confirm(`${uniqueNew.length} 台の新しいデバイスが見つかりました。\n追加しますか？\n${uniqueNew.join(', ')}`)) {
-          setSavedIPs([...savedIPs, ...uniqueNew]);
+          const newConfigs = uniqueNew.map(ip => ({ name: `Auto-${ip.split('.').pop()}`, ip }));
+          setSavedServers([...savedServers, ...newConfigs]);
         }
       } else {
         alert("新しいデバイスは見つかりませんでした。");
@@ -150,7 +179,15 @@ const App: React.FC = () => {
             {/* Server Grid */}
             {servers.length === 0 ? (
                <div className="text-center py-20 border-2 border-dashed border-gray-800 rounded-xl">
-                 <p className="text-gray-500">監視対象のサーバーがありません。右上から追加してください。</p>
+                 <HardDrive size={48} className="mx-auto text-gray-600 mb-4" />
+                 <h3 className="text-xl font-medium text-gray-300">監視サーバーが登録されていません</h3>
+                 <p className="text-gray-500 mb-6">右上の "Add Server" ボタンから登録を開始してください。</p>
+                 <button 
+                  onClick={() => setShowAddModal(true)}
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg"
+                 >
+                   最初のサーバーを追加
+                 </button>
                </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
@@ -175,19 +212,37 @@ const App: React.FC = () => {
       {showAddModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-gray-800 rounded-xl p-6 w-full max-w-md border border-gray-700 shadow-2xl">
-            <h3 className="text-xl font-bold mb-4">Add Monitoring Target</h3>
-            <p className="text-gray-400 text-sm mb-4">
-              エージェントが稼働しているサーバーのIPアドレスを入力してください。
-            </p>
-            <input 
-              type="text" 
-              placeholder="e.g., 192.168.1.50"
-              className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white mb-6 focus:ring-2 focus:ring-blue-500 outline-none"
-              value={newIp}
-              onChange={(e) => setNewIp(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddServer()}
-            />
-            <div className="flex justify-end gap-3">
+            <h3 className="text-xl font-bold mb-4">サーバー追加</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Server Name (任意)</label>
+                <input 
+                  type="text" 
+                  placeholder="例: A100-Node-01"
+                  className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">IP Address / Hostname</label>
+                <input 
+                  type="text" 
+                  placeholder="例: 192.168.1.50"
+                  className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                  value={newIp}
+                  onChange={(e) => setNewIp(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddServer()}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  ※このアプリを動かしているサーバー自身を追加する場合: <code>localhost</code> または <code>127.0.0.1</code>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-8">
               <button 
                 onClick={() => setShowAddModal(false)}
                 className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
@@ -196,7 +251,8 @@ const App: React.FC = () => {
               </button>
               <button 
                 onClick={handleAddServer}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium"
+                disabled={!newIp}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-lg font-medium"
               >
                 Add Server
               </button>

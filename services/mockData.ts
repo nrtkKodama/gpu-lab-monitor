@@ -1,7 +1,15 @@
 import { ServerNode, GPUInfo } from '../types';
 
 // ==========================================
-// MOCK DATA GENERATOR (For Demo/Development)
+// CONFIGURATION
+// ==========================================
+
+// true: 開発用デモデータを使用 (サーバー不要)
+// false: 実際のサーバー(Python Agent)と通信
+const USE_MOCK_MODE = false;
+
+// ==========================================
+// MOCK DATA GENERATOR
 // ==========================================
 
 const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1) + min);
@@ -66,19 +74,23 @@ export const fetchMockServerData = (ip: string, name: string): Promise<ServerNod
 };
 
 // ==========================================
-// REAL API CLIENT (For Production)
+// REAL API CLIENT
 // ==========================================
 
-export const fetchRealServerData = async (ip: string, name: string): Promise<ServerNode> => {
+export const fetchRealServerData = async (address: string, name: string): Promise<ServerNode> => {
   try {
-    // Agent port is assumed to be 8000
-    // Note: If you deploy agent on a different port, update it here.
     const AGENT_PORT = 8000;
     
+    // addressが "http" で始まらない場合は補完する
+    // ngrokのURLなどが直接入力された場合に対応
+    const url = address.startsWith('http') 
+      ? `${address}/metrics`
+      : `http://${address}:${AGENT_PORT}/metrics`;
+    
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
 
-    const response = await fetch(`http://${ip}:${AGENT_PORT}/metrics`, {
+    const response = await fetch(url, {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
@@ -90,20 +102,20 @@ export const fetchRealServerData = async (ip: string, name: string): Promise<Ser
     const data = await response.json();
     
     return {
-      id: ip,
-      ip,
-      name,
+      id: address,
+      ip: address, // Display raw input as IP/Host
+      name: name,
       status: 'online',
       lastUpdated: new Date().toLocaleTimeString(),
-      gpus: data.gpus || [], // Assuming backend returns { gpus: [...] }
+      gpus: data.gpus || [], 
     };
   } catch (error) {
-    console.error(`Failed to fetch from ${ip}:`, error);
+    console.warn(`Failed to fetch from ${address}:`, error);
     return {
-      id: ip,
-      ip,
-      name,
-      status: 'offline', // or 'warning'
+      id: address,
+      ip: address,
+      name: name,
+      status: 'offline', 
       lastUpdated: new Date().toLocaleTimeString(),
       gpus: [],
     };
@@ -111,30 +123,18 @@ export const fetchRealServerData = async (ip: string, name: string): Promise<Ser
 };
 
 export const scanLocalNetwork = (): Promise<string[]> => {
-  // Browser cannot perform real network scans due to sandbox restrictions.
-  // In a real app, you might manually add IPs or fetch a list from a central registry.
   return new Promise((resolve) => {
     setTimeout(() => {
       resolve([
         '192.168.1.101',
         '192.168.1.105',
-        '192.168.1.110',
-        '192.168.1.150'
       ]);
     }, 1500);
   });
 };
 
 // ==========================================
-// EXPORT CONFIGURATION
+// EXPORT
 // ==========================================
 
-// [MODE SELECTION]
-// デモデータ(Mock)を使用するか、実機(Real)と通信するかをここで切り替えます。
-// Toggle comment out to switch modes.
-
-// 1. デモモード (開発用 - サーバー不要)
-export const fetchServerData = fetchMockServerData;
-
-// 2. 本番モード (実機用 - Pythonエージェントが必要)
-// export const fetchServerData = fetchRealServerData;
+export const fetchServerData = USE_MOCK_MODE ? fetchMockServerData : fetchRealServerData;
