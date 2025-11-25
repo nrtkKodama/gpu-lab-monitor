@@ -129,7 +129,7 @@ def get_gpu_processes():
             parts = line.split(',')
             pid = safe_int(parts[0])
             proc_name = parts[1].strip()
-            mem_used = safe_int(parts[2])
+            mem_used = safe_int(row[2]) if len(parts) > 2 else 0
             
             container_info = docker_map.get(pid)
             user = container_info['user'] if container_info else "system"
@@ -215,7 +215,7 @@ After=network.target docker.service
 [Service]
 User=root
 WorkingDirectory=/opt/gpu-monitor
-ExecStart=uvicorn monitor:app --host 0.0.0.0 --port 8000
+ExecStart=/usr/local/bin/uvicorn monitor:app --host 0.0.0.0 --port 8000
 Restart=always
 
 [Install]
@@ -232,7 +232,32 @@ sudo systemctl start gpu-monitor
 
 ---
 
-### Step 3: ダッシュボードアプリの起動 (管理者PC)
+### Step 3: ファイアウォール設定 (重要) 🛡️
+
+`ERR_CONNECTION_RESET` や接続タイムアウトが発生する場合、サーバーのファイアウォールがポートをブロックしています。以下のコマンドでポートを開放してください。
+
+#### GPUサーバー側 (エージェント用ポート: 8000)
+```bash
+# UFW (Ubuntu標準) の場合
+sudo ufw allow 8000/tcp
+sudo ufw reload
+
+# Firewalld (CentOS/RHEL系) の場合
+sudo firewall-cmd --add-port=8000/tcp --permanent
+sudo firewall-cmd --reload
+```
+
+#### 管理者PC側 (Reactアプリ用ポート: 3000)
+※ `npm start` でアプリをホストしているPCに対して、他のPCからアクセスする場合のみ必要です。
+
+```bash
+sudo ufw allow 3000/tcp
+sudo ufw reload
+```
+
+---
+
+### Step 4: ダッシュボードアプリの起動 (管理者PC)
 
 再び管理者PC（リポジトリをクローンしたPC）に戻ります。
 
@@ -241,11 +266,7 @@ sudo systemctl start gpu-monitor
 npm install
 ```
 
-#### 2. モード設定について
-デフォルト設定では「実サーバーモード」になっています。
-すでに Python エージェントを起動していれば、設定変更なしで動作します。
-
-#### 3. アプリの起動
+#### 2. アプリの起動
 開発モードで起動します。
 
 ```bash
@@ -257,7 +278,25 @@ npm start
 
 ---
 
-### Step 4: Webサーバーへのデプロイ
+## ❓ トラブルシューティング
+
+### Q. IPアドレスを追加しても "Connection lost" になる
+1. **IPアドレスの確認:** 登録したIPが、アプリを開いているPCから到達可能か (`ping 192.168.1.XX`) 確認してください。
+2. **ファイアウォール:** Step 3のポート開放が行われているか確認してください。
+3. **エージェント起動確認:** GPUサーバーで `sudo systemctl status gpu-monitor` を実行し、Activeになっているか確認してください。
+4. **Mixed Content:** GitHub Pages (HTTPS) を使用している場合、HTTPのエージェントには接続できません。詳細は `docs/GITHUB_PAGES.md` を参照してください。
+
+### Q. Dockerのユーザー名が表示されない
+エージェントを実行しているユーザーが `docker` グループに所属していない可能性があります。
+`monitor.py` を `root` 権限で実行するか、実行ユーザーをdockerグループに追加してください。
+```bash
+sudo usermod -aG docker $USER
+# 再ログインが必要
+```
+
+---
+
+### Step 5: Webサーバーへのデプロイ
 
 このアプリを永続的にアクセス可能にする方法は2つあります。
 
