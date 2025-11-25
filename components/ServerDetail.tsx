@@ -1,6 +1,6 @@
 import React from 'react';
 import { ServerNode } from '../types';
-import { ArrowLeft, RefreshCw, Cpu, Thermometer, Zap, Box } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Cpu, Thermometer, Box, Database, Zap } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface ServerDetailProps {
@@ -68,10 +68,10 @@ const ServerDetail: React.FC<ServerDetailProps> = ({ server, onBack, onRefresh }
           </div>
         </div>
 
-        {/* Temperature & Power */}
+        {/* Temperature & Power & Memory */}
         <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700 overflow-y-auto max-h-[350px]">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Thermometer size={18} className="text-red-400" /> Thermal & Power Stats
+            <Thermometer size={18} className="text-red-400" /> Thermal, Power & Memory
           </h3>
           <div className="space-y-4">
             {server.gpus.map((gpu) => (
@@ -83,21 +83,32 @@ const ServerDetail: React.FC<ServerDetailProps> = ({ server, onBack, onRefresh }
                       <Thermometer size={14} /> {gpu.temperature}°C
                     </span>
                     <span className="flex items-center gap-1 text-yellow-400">
-                      <Zap size={14} /> {gpu.power.draw}W / {gpu.power.limit}W
+                      <Zap size={14} /> {gpu.power.draw}W
                     </span>
                   </div>
                 </div>
+                
                 {/* Memory Bar Specific */}
-                <div className="w-full bg-gray-700 h-2 rounded-full mt-2 overflow-hidden">
-                   <div 
-                      className="h-full bg-indigo-500"
-                      style={{ width: `${(gpu.memory.used / gpu.memory.total) * 100}%`}}
-                   ></div>
+                <div className="relative pt-1">
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="text-gray-400 flex items-center gap-1"><Database size={10}/> Memory Usage</span>
+                    <span className="text-gray-300 font-mono">
+                      <span className="font-bold text-white">{(gpu.memory.used / 1024).toFixed(1)} GB</span>
+                      <span className="text-gray-500"> / {(gpu.memory.total / 1024).toFixed(0)} GB</span>
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
+                     <div 
+                        className={`h-full ${gpu.utilization.memory > 90 ? 'bg-orange-500' : 'bg-indigo-500'}`}
+                        style={{ width: `${(gpu.memory.used / gpu.memory.total) * 100}%`}}
+                     ></div>
+                  </div>
+                  <div className="flex justify-between text-[10px] text-gray-500 mt-1">
+                    <span>{gpu.memory.used} MiB</span>
+                    <span>{Math.round((gpu.memory.used / gpu.memory.total) * 100)}%</span>
+                  </div>
                 </div>
-                <div className="flex justify-between text-xs text-gray-500 mt-1">
-                  <span>Memory: {gpu.memory.used}MiB / {gpu.memory.total}MiB</span>
-                  <span>{Math.round((gpu.memory.used / gpu.memory.total) * 100)}%</span>
-                </div>
+
               </div>
             ))}
           </div>

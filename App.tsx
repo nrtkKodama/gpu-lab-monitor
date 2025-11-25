@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { ServerNode, ViewState, ServerConfig } from './types';
-import { fetchServerData, scanLocalNetwork } from './services/mockData';
+import { fetchServerData, scanLocalNetwork, testServerConnection } from './services/mockData';
 import ServerCard from './components/ServerCard';
 import ServerDetail from './components/ServerDetail';
 import HelpGuide from './components/HelpGuide';
-import { LayoutDashboard, Plus, Network, HelpCircle, HardDrive, Search, Loader2 } from 'lucide-react';
+import { LayoutDashboard, Plus, Network, HelpCircle, HardDrive, Search, Loader2, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
 
 const App: React.FC = () => {
   // Persistence: Load servers from localStorage on boot
@@ -41,6 +41,10 @@ const App: React.FC = () => {
   const [newIp, setNewIp] = useState('');
   const [newName, setNewName] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  
+  // Connection Test State
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
 
   // Effect to sync savedServers to localStorage
   useEffect(() => {
@@ -67,6 +71,23 @@ const App: React.FC = () => {
     }
   };
 
+  const resetAddModal = () => {
+    setNewIp('');
+    setNewName('');
+    setTestResult(null);
+    setIsTesting(false);
+    setShowAddModal(false);
+  };
+
+  const handleTestConnection = async () => {
+    if (!newIp) return;
+    setIsTesting(true);
+    setTestResult(null);
+    const result = await testServerConnection(newIp);
+    setTestResult(result);
+    setIsTesting(false);
+  };
+
   const handleAddServer = () => {
     if (newIp) {
       // Check for duplicates
@@ -77,9 +98,7 @@ const App: React.FC = () => {
       
       const name = newName.trim() || `Server-${newIp.split('.').pop()}`;
       setSavedServers([...savedServers, { name, ip: newIp }]);
-      setNewIp('');
-      setNewName('');
-      setShowAddModal(false);
+      resetAddModal();
     }
   };
 
@@ -111,7 +130,7 @@ const App: React.FC = () => {
           setSavedServers([...savedServers, ...newConfigs]);
         }
       } else {
-        alert(`スキャン完了: 範囲 ${prefix}.1 - 254\n新しいデバイスは見つかりませんでした。\n(ファイアウォールでポート8000が許可されているか確認してください)`);
+        alert(`スキャン完了: 範囲 ${prefix}.1 - 254\n新しいデバイスは見つかりませんでした。\n(VPN経由など遠隔地の場合は、個別にAdd Serverからテストしてください)`);
       }
     } catch (e) {
       console.error(e);
@@ -251,8 +270,8 @@ const App: React.FC = () => {
                     .x
                   </span>
                 </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  ※ブラウザの制限により、スキャンには数秒〜数十秒かかる場合があります。
+                <p className="text-xs text-gray-500 mt-2 text-yellow-500/80">
+                  ※遠隔地やVPN経由のサーバーも検出できるよう、タイムアウトを長め(2000ms)に設定しています。
                 </p>
               </div>
             </div>
@@ -295,23 +314,37 @@ const App: React.FC = () => {
 
               <div>
                 <label className="block text-sm text-gray-400 mb-1">IP Address / Hostname</label>
-                <input 
-                  type="text" 
-                  placeholder="例: 192.168.1.50"
-                  className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 outline-none font-mono"
-                  value={newIp}
-                  onChange={(e) => setNewIp(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddServer()}
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  ※このアプリを動かしているサーバー自身を追加する場合: <code>localhost</code> または <code>127.0.0.1</code>
-                </p>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    placeholder="例: 192.168.1.50"
+                    className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                    value={newIp}
+                    onChange={(e) => setNewIp(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddServer()}
+                  />
+                  <button 
+                    onClick={handleTestConnection}
+                    disabled={!newIp || isTesting}
+                    className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm text-gray-200 border border-gray-600 disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {isTesting ? <Loader2 size={18} className="animate-spin"/> : "接続テスト"}
+                  </button>
+                </div>
               </div>
+              
+              {/* Test Results */}
+              {testResult && (
+                <div className={`p-3 rounded-lg text-sm flex items-start gap-2 border ${testResult.success ? 'bg-green-900/20 border-green-800 text-green-200' : 'bg-red-900/20 border-red-800 text-red-200'}`}>
+                  {testResult.success ? <CheckCircle2 size={18} className="mt-0.5 shrink-0"/> : <AlertTriangle size={18} className="mt-0.5 shrink-0"/>}
+                  <span>{testResult.message}</span>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-3 mt-8">
               <button 
-                onClick={() => setShowAddModal(false)}
+                onClick={resetAddModal}
                 className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
               >
                 Cancel

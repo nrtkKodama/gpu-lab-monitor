@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import http from 'node:http';
+import { exec } from 'node:child_process';
 
 export default defineConfig({
   plugins: [
@@ -16,8 +17,7 @@ export default defineConfig({
           const subnet = urlObj.searchParams.get('subnet'); // 例: "192.168.1"
 
           if (!subnet) {
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: 'Missing subnet parameter' }));
+            next();
             return;
           }
 
@@ -25,7 +25,7 @@ export default defineConfig({
           const checkHost = (ip: string) => {
             return new Promise<string | null>((resolve) => {
               const request = http.get(`http://${ip}:8000/metrics`, {
-                timeout: 500, // 500msでタイムアウト（高速化の鍵）
+                timeout: 2000, // 遠隔地も考慮してタイムアウトを2000msに延長
               }, (response) => {
                 if (response.statusCode === 200) {
                   resolve(ip);
@@ -64,15 +64,51 @@ export default defineConfig({
         });
 
         // =========================================
-        // 2. プロキシ API (既存機能)
+        // 2. システムPing API (接続診断用)
+        // =========================================
+        server.middlewares.use('/api/sys-ping', (req, res, next) => {
+           const urlObj = new URL(req.url || '', `http://${req.headers.host}`);
+           const target = urlObj.searchParams.get('target');
+           
+           if (!target) {
+             next();
+             return;
+           }
+
+           // 簡易サニタイズ (IPアドレスまたはホスト名)
+           if (!/^[a-zA-Z0-9.\-_]+$/.test(target)) {
+             res.statusCode = 400;
+             res.setHeader('Content-Type', 'application/json');
+             res.end(JSON.stringify({ error: 'Invalid target format' }));
+             return;
+           }
+           
+           // OS判定してPingコマンドを決定
+           const isWin = process.platform === 'win32';
+           const cmd = isWin 
+             ? `ping -n 1 -w 2000 ${target}` 
+             : `ping -c 1 -W 2 ${target}`;
+             
+           exec(cmd, (error, stdout, stderr) => {
+             res.setHeader('Content-Type', 'application/json');
+             // pingコマンドは到達不能の場合に終了コード非0を返すことが多い
+             if (error) {
+               res.end(JSON.stringify({ reachable: false, output: stdout || stderr }));
+             } else {
+               res.end(JSON.stringify({ reachable: true, output: stdout }));
+             }
+           });
+        });
+
+        // =========================================
+        // 3. プロキシ API (既存機能)
         // =========================================
         server.middlewares.use('/api/proxy', async (req, res, next) => {
           const urlObj = new URL(req.url || '', `http://${req.headers.host}`);
           const target = urlObj.searchParams.get('target');
 
           if (!target) {
-            res.statusCode = 400;
-            res.end('Missing target parameter');
+            next();
             return;
           }
 

@@ -182,6 +182,51 @@ export const fetchRealServerData = async (address: string, name: string): Promis
 };
 
 /**
+ * サーバー接続診断
+ * Ping疎通確認とエージェント応答確認を行う
+ */
+export const testServerConnection = async (ip: string) => {
+  // 1. Ping Check via Backend
+  let pingOk = false;
+  try {
+    const res = await fetch(`/api/sys-ping?target=${ip}`);
+    if (res.ok) {
+      const data = await res.json();
+      pingOk = data.reachable;
+    }
+  } catch (e) {
+    console.warn("Ping API failed", e);
+  }
+
+  // 2. Agent Check via Real Data Fetch (which handles direct/proxy)
+  let agentOk = false;
+  let message = "";
+  try {
+    const data = await fetchRealServerData(ip, "Test");
+    if (data.status === 'online') {
+      agentOk = true;
+      message = "接続成功: エージェントは正常に応答しています。";
+    } else {
+      message = "エージェント応答なし (Port 8000を確認してください)";
+    }
+  } catch (e) {
+    message = String(e);
+  }
+
+  // 結果メッセージの生成
+  if (pingOk && agentOk) {
+    return { success: true, message: "✅ Ping: OK, Agent: OK - 正常に監視可能です。" };
+  } else if (pingOk && !agentOk) {
+    return { success: false, message: "⚠️ Ping: OK, Agent: NG - サーバーは存在しますが、エージェント(Port 8000)に繋がりません。ファイアウォール設定または monitor.py の起動状況を確認してください。" };
+  } else if (!pingOk && agentOk) {
+    // エージェントが見えているならPingが通らなくてもOK（ファイアウォール設定等）
+    return { success: true, message: "✅ Ping: Blocked, Agent: OK - Pingは拒否されましたが、エージェントは応答しています。" };
+  } else {
+    return { success: false, message: "❌ Ping: NG, Agent: NG - サーバーに到達できません。IPアドレスとネットワーク接続を確認してください。" };
+  }
+};
+
+/**
  * 高速ネットワークスキャン
  * 管理サーバー(Vite)の /api/scan エンドポイントを使用して、サーバー側で並列実行する
  */
