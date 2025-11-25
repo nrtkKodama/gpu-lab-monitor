@@ -96,7 +96,7 @@ export const fetchRealServerData = async (address: string, name: string): Promis
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      throw new Error(`Error: ${response.status}`);
+      throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
@@ -110,7 +110,17 @@ export const fetchRealServerData = async (address: string, name: string): Promis
       gpus: data.gpus || [], 
     };
   } catch (error) {
-    console.warn(`Failed to fetch from ${address}:`, error);
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn(`[GPU-Monitor] Failed to fetch from ${address}:`, msg);
+    
+    // Check for common errors to give hints in Console
+    if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+      console.info(`💡 HINT for ${address}:`);
+      console.info(`1. Is monitor.py running? (Try: curl http://${address}:8000/metrics)`);
+      console.info(`2. Is port 8000 open? (Try: sudo ufw allow 8000)`);
+      console.info(`3. Mixed Content? If you are on HTTPS, you cannot call HTTP ip. See docs.`);
+    }
+
     return {
       id: address,
       ip: address,

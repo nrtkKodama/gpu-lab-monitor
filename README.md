@@ -51,10 +51,10 @@ pip3 install fastapi uvicorn
 ```
 
 #### 2. エージェントスクリプトの作成
-適当な場所（例: `/opt/gpu-monitor`）を作成し、以下のスクリプトを `monitor.py` として保存します。
-**このスクリプトは nvidia-smi が「N/A」を返した場合でもクラッシュしないように対策されています。**
+リポジトリに含まれている `monitor.py` を使用するか、以下の内容で作成してください。
+このスクリプトは `nvidia-smi` のエラーハンドリングと、Dockerコンテナとの紐付けを行います。
 
-**ファイル: `/opt/gpu-monitor/monitor.py`**
+**ファイル: `monitor.py`**
 
 ```python
 import subprocess
@@ -121,21 +121,26 @@ def get_gpu_processes():
     docker_map = get_docker_map()
 
     try:
-        cmd = ["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"]
+        # gpu_index, pid, process_name, used_memory
+        cmd = ["nvidia-smi", "--query-compute-apps=gpu_index,pid,process_name,used_memory", "--format=csv,noheader,nounits"]
         output = subprocess.check_output(cmd).decode()
         
         for line in output.splitlines():
             if not line.strip(): continue
             parts = line.split(',')
-            pid = safe_int(parts[0])
-            proc_name = parts[1].strip()
-            mem_used = safe_int(row[2]) if len(parts) > 2 else 0
+            if len(parts) < 4: continue
+            
+            gpu_idx = safe_int(parts[0])
+            pid = safe_int(parts[1])
+            proc_name = parts[2].strip()
+            mem_used = safe_int(parts[3])
             
             container_info = docker_map.get(pid)
             user = container_info['user'] if container_info else "system"
             container_name = container_info['containerName'] if container_info else None
             
             processes.append({
+                "gpuIndex": gpu_idx,
                 "pid": pid,
                 "type": "C",
                 "processName": proc_name,
@@ -146,6 +151,10 @@ def get_gpu_processes():
     except Exception:
         pass # プロセスがない場合
     return processes
+
+@app.get("/")
+def root():
+    return {"message": "GPU Monitor Agent is Running. Access /metrics for data."}
 
 @app.get("/metrics")
 def metrics():
@@ -175,6 +184,9 @@ def metrics():
             temp = safe_int(row[7])
             power_draw = safe_int(row[8]) # Wattは整数表示で十分
             power_limit = safe_int(row[9])
+            
+            # このGPUに関連するプロセスのみをフィルタリング
+            gpu_processes = [p for p in all_processes if p['gpuIndex'] == index]
 
             gpus.append({
                 "index": index,
@@ -183,12 +195,13 @@ def metrics():
                 "memory": {"total": mem_total, "used": mem_used, "free": mem_free},
                 "temperature": temp,
                 "power": {"draw": power_draw, "limit": power_limit},
-                "processes": all_processes
+                "processes": gpu_processes
             })
             
         return {"status": "online", "gpus": gpus}
         
     except Exception as e:
+        # エラー時もJSONを返してクライアント側で処理できるようにする
         return {"status": "error", "message": str(e), "gpus": []}
 
 if __name__ == "__main__":
@@ -283,7 +296,7 @@ npm start
 ### Q. IPアドレスを追加しても "Connection lost" になる
 1. **IPアドレスの確認:** 登録したIPが、アプリを開いているPCから到達可能か (`ping 192.168.1.XX`) 確認してください。
 2. **ファイアウォール:** Step 3のポート開放が行われているか確認してください。
-3. **エージェント起動確認:** GPUサーバーで `sudo systemctl status gpu-monitor` を実行し、Activeになっているか確認してください。
+3. **エージェント起動確認:** GPUサーバーで `curl http://localhost:8000` を実行しメッセージが返るか、または `sudo systemctl status gpu-monitor` を確認してください。
 4. **Mixed Content:** GitHub Pages (HTTPS) を使用している場合、HTTPのエージェントには接続できません。詳細は `docs/GITHUB_PAGES.md` を参照してください。
 
 ### Q. Dockerのユーザー名が表示されない
@@ -293,23 +306,3 @@ npm start
 sudo usermod -aG docker $USER
 # 再ログインが必要
 ```
-
----
-
-### Step 5: Webサーバーへのデプロイ
-
-このアプリを永続的にアクセス可能にする方法は2つあります。
-
-#### A. 研究室内のサーバーで配信する（推奨）
-研究室内のWebサーバー（nginxやApache）にビルドしたファイルを配置します。
-```bash
-npm run build
-# build/ (または dist/) フォルダの中身をドキュメントルートへコピー
-```
-※ 同じLAN内であればHTTP同士で通信できるため、トラブルが少ない最も推奨される方法です。
-
-#### B. GitHub Pages で公開する
-インターネット上（`username.github.io`）から研究室内のサーバーを見に行きます。
-**HTTPSとHTTPの混在（Mixed Content）問題**への対処が必要になります。
-
-👉 **[詳細な手順と設定方法はこちらのドキュメントを参照してください](docs/GITHUB_PAGES.md)**
