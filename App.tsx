@@ -64,7 +64,8 @@ const App: React.FC = () => {
   }, [savedServers]);
 
   const refreshAllData = async () => {
-    const promises = savedServers.map((config) => fetchServerData(config.ip, config.name));
+    // Pass the full config object to support "Original IP -> Tunnel IP" fallback logic
+    const promises = savedServers.map((config) => fetchServerData(config));
     const results = await Promise.all(promises);
     setServers(results);
     

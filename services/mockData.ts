@@ -1,4 +1,4 @@
-import { ServerNode, GPUInfo } from '../types';
+import { ServerNode, GPUInfo, ServerConfig } from '../types';
 
 // ==========================================
 // CONFIGURATION
@@ -93,20 +93,17 @@ const fetchWithTimeout = async (url: string, timeoutMs: number) => {
   }
 };
 
-export const fetchRealServerData = async (address: string, name: string): Promise<ServerNode> => {
+/**
+ * 単一のターゲットアドレスに対してデータ取得を試みる内部関数
+ * Direct Access -> Proxy Access の順で試行する
+ */
+const attemptFetchTarget = async (address: string, name: string): Promise<ServerNode> => {
   const AGENT_PORT = 8000;
-  
   let targetUrl = '';
-  
-  // URL生成ロジック:
-  // 1. httpスキームがなければ付与
-  // 2. ポート番号が指定されていなければデフォルト(8000)を付与
-  //    (localhost:18001 のようなトンネル接続に対応するため)
   
   if (address.startsWith('http')) {
     targetUrl = `${address}/metrics`;
   } else {
-    // IPv6などは考慮せず、簡易的にコロンの有無でポート指定を判定
     const hasPort = address.includes(':');
     if (hasPort) {
       targetUrl = `http://${address}/metrics`;
@@ -116,93 +113,85 @@ export const fetchRealServerData = async (address: string, name: string): Promis
   }
 
   let jsonData: any = null;
-  let isProxyUsed = false;
+  let errorMsg = '';
 
+  // 1. Direct Fetch
   try {
-    // ---------------------------------------------------------
-    // 1. まず直接通信を試みる (LAN内PC用 / SSHトンネル localhost用)
-    // ---------------------------------------------------------
-    try {
-      // タイムアウトを短く設定(1.5秒)して、ダメならすぐプロキシへ
-      const res = await fetchWithTimeout(targetUrl, 1500);
-      if (res.ok) {
-        jsonData = await res.json();
-      }
-    } catch (e) {
-      // Direct access fail is expected if client is remote. Ignore error and fallback.
+    const res = await fetchWithTimeout(targetUrl, 1500);
+    if (res.ok) {
+      jsonData = await res.json();
     }
+  } catch (e) {
+    // Direct failed, proceed to proxy
+  }
 
-    // ---------------------------------------------------------
-    // 2. 失敗した場合、管理サーバー経由(Proxy)で試みる (SSHトンネル/リモート用)
-    // ---------------------------------------------------------
-    if (!jsonData) {
-      // プロキシURL: 現在のページホスト(localhost:3000)のAPIを叩く
+  // 2. Proxy Fetch
+  if (!jsonData) {
+    try {
       const proxyUrl = `/api/proxy?target=${encodeURIComponent(targetUrl)}`;
-      isProxyUsed = true;
-      
-      const res = await fetchWithTimeout(proxyUrl, 10000); // 10秒タイムアウト(重い処理のため)
-      
+      const res = await fetchWithTimeout(proxyUrl, 10000); // 10s timeout
       if (!res.ok) {
-        throw new Error(`Proxy Error: ${res.status} ${res.statusText}`);
+        throw new Error(`Proxy status: ${res.status}`);
       }
       jsonData = await res.json();
-      
-      // プロキシ自体がエラーJSONを返してきた場合
       if (jsonData.status === 'error' && jsonData.message) {
-        throw new Error(`Proxy Upstream Error: ${jsonData.message}`);
+        throw new Error(`Agent Error: ${jsonData.message}`);
       }
+    } catch (e) {
+      if (e instanceof Error) errorMsg = e.message;
+      else errorMsg = String(e);
+      throw e; // Rethrow to let the caller handle fallback
     }
-
-    // データ整形
-    return {
-      id: address,
-      ip: address, 
-      name: name,
-      status: 'online',
-      lastUpdated: new Date().toLocaleTimeString(),
-      gpus: jsonData.gpus || [], 
-    };
-
-  } catch (error) {
-    // Error Handling & Logging
-    let msg = String(error);
-    let isTimeout = false;
-    
-    if (error instanceof Error) {
-      if (error.name === 'AbortError') {
-        msg = isProxyUsed 
-          ? 'Timeout (Proxy)' 
-          : 'Timeout';
-        isTimeout = true;
-      } else {
-        msg = error.message;
-      }
-    }
-
-    if (!isTimeout) {
-      // タイムアウト以外のエラーはコンソールに出してデバッグしやすくする
-      console.warn(`[GPU-Monitor] Failed to fetch from ${address}:`, msg);
-    }
-    
-    return {
-      id: address,
-      ip: address,
-      name: name,
-      status: 'offline', // warning ではなく offline にして分かりやすく
-      lastUpdated: new Date().toLocaleTimeString(),
-      gpus: [],
-    };
   }
+
+  return {
+    id: address, // This ID might be temporary if we are trying fallbacks, but cleaner to return data
+    ip: address, 
+    name: name,
+    status: 'online',
+    lastUpdated: new Date().toLocaleTimeString(),
+    gpus: jsonData.gpus || [], 
+  };
+};
+
+export const fetchRealServerData = async (config: ServerConfig): Promise<ServerNode> => {
+  // Priority 1: Try Original IP (Real Remote IP)
+  // This is preferred because it doesn't require SSH tunnels to be active if the network allows direct access (e.g. inside lab)
+  if (config.originalIp) {
+    try {
+      const node = await attemptFetchTarget(config.originalIp, config.name);
+      // Success - return data, but ensure ID matches the config.ip (primary key) to avoid duplicate keys in React list
+      return { ...node, id: config.ip, ip: config.originalIp }; // Show Real IP in UI
+    } catch (e) {
+      // Failed, continue to fallback
+      // console.debug(`Direct connection to ${config.originalIp} failed. Trying fallback to ${config.ip}`);
+    }
+  }
+
+  // Priority 2: Try Configured IP (which might be localhost tunnel)
+  try {
+    const node = await attemptFetchTarget(config.ip, config.name);
+    return { ...node, id: config.ip };
+  } catch (e) {
+    // console.debug(`Connection to ${config.ip} failed.`);
+  }
+
+  // All attempts failed
+  return {
+    id: config.ip,
+    ip: config.originalIp || config.ip, // Prefer showing real IP if available
+    name: config.name,
+    status: 'offline',
+    lastUpdated: new Date().toLocaleTimeString(),
+    gpus: [],
+  };
 };
 
 /**
  * サーバー接続診断
- * Ping疎通確認とエージェント応答確認を行う
  */
 export const testServerConnection = async (ip: string) => {
-  // 1. Ping Check via Backend
   let pingOk = false;
-  // ポート番号が含まれている場合は除去してPingする (localhost:18001 -> localhost)
   const hostOnly = ip.split(':')[0];
   
   try {
@@ -215,11 +204,11 @@ export const testServerConnection = async (ip: string) => {
     console.warn("Ping API failed", e);
   }
 
-  // 2. Agent Check via Real Data Fetch (which handles direct/proxy)
   let agentOk = false;
   let message = "";
   try {
-    const data = await fetchRealServerData(ip, "Test");
+    // Test uses a temporary config
+    const data = await fetchRealServerData({ name: "Test", ip: ip });
     if (data.status === 'online') {
       agentOk = true;
       message = "接続成功: エージェントは正常に応答しています。";
@@ -230,13 +219,11 @@ export const testServerConnection = async (ip: string) => {
     message = String(e);
   }
 
-  // 結果メッセージの生成
   if (pingOk && agentOk) {
     return { success: true, message: "✅ Ping: OK, Agent: OK - 正常に監視可能です。" };
   } else if (pingOk && !agentOk) {
     return { success: false, message: "⚠️ Ping: OK, Agent: NG - サーバーは存在しますが、エージェント(Port 8000)に繋がりません。ファイアウォール設定または monitor.py の起動状況を確認してください。" };
   } else if (!pingOk && agentOk) {
-    // エージェントが見えているならPingが通らなくてもOK（ファイアウォール設定等）
     return { success: true, message: "✅ Ping: Blocked, Agent: OK - Pingは拒否されましたが、エージェントは応答しています。" };
   } else {
     return { success: false, message: "❌ Ping: NG, Agent: NG - サーバーに到達できません。IPアドレスとネットワーク接続を確認してください。" };
@@ -245,25 +232,15 @@ export const testServerConnection = async (ip: string) => {
 
 /**
  * 高速ネットワークスキャン
- * 管理サーバー(Vite)の /api/scan エンドポイントを使用して、サーバー側で並列実行する
  */
 export const scanLocalNetwork = async (subnetPrefix: string): Promise<string[]> => {
   console.log(`Starting fast server-side scan for ${subnetPrefix}.x ...`);
   try {
-    // ブラウザから1つずつFetchすると時間がかかるため、
-    // 管理サーバー(Node.js)に一括スキャンを依頼する
     const res = await fetch(`/api/scan?subnet=${subnetPrefix}`);
-    
-    if (!res.ok) {
-      throw new Error(`Scan API error: ${res.status} ${res.statusText}`);
-    }
-    
-    const foundIps: string[] = await res.json();
-    return foundIps;
-    
+    if (!res.ok) throw new Error(`Scan API error: ${res.status}`);
+    return await res.json();
   } catch (e) {
     console.error("Fast scan failed:", e);
-    // エラー時は空リストを返す
     return [];
   }
 };
@@ -272,4 +249,9 @@ export const scanLocalNetwork = async (subnetPrefix: string): Promise<string[]> 
 // EXPORT
 // ==========================================
 
-export const fetchServerData = USE_MOCK_MODE ? fetchMockServerData : fetchRealServerData;
+export const fetchServerData = (config: ServerConfig): Promise<ServerNode> => {
+  if (USE_MOCK_MODE) {
+    return fetchMockServerData(config.ip, config.name);
+  }
+  return fetchRealServerData(config);
+};
