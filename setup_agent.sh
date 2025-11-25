@@ -182,7 +182,7 @@ def get_metrics():
 if __name__ == "__main__":
     # 仮想環境内であれば uvicorn はそのまま呼び出せるが
     # スクリプト直接実行時はライブラリ呼び出しになる
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=4274)
 EOF
 
 # 6. Systemdサービスの作成 (仮想環境のPythonを指定)
@@ -210,14 +210,14 @@ systemctl restart gpu-monitor
 
 # ファイアウォール確認
 if command -v ufw > /dev/null; then
-    ufw allow 8000/tcp > /dev/null
+    ufw allow 4274/tcp > /dev/null
 fi
 
 # 動作確認
 echo "✅ セットアップ完了。動作確認中..."
 sleep 2
 
-if curl -s http://localhost:8000/metrics | grep -q "online"; then
+if curl -s http://localhost:4274/metrics | grep -q "online"; then
     echo ""
     echo "🎉 成功！Venv環境で正常に動作しています。"
     echo "-----------------------------------------------------"
