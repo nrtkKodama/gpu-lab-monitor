@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ServerConfig } from '../types';
-import { Download, Upload, Copy, Check, Terminal, Save, X, XCircle } from 'lucide-react';
+import { Download, Upload, Copy, Check, Terminal, Save, X, XCircle, ArrowRightLeft, ShieldCheck } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -16,12 +16,39 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, servers,
 
   if (!isOpen) return null;
 
+  // ローカルポートの開始番号
+  const START_PORT = 18001;
+
   const generateSshConfig = () => {
     if (servers.length === 0) return "# サーバーが登録されていません";
-    return servers.map(s => {
+    
+    let config = "# ==========================================\n";
+    config += "# GPU Monitor SSH Tunnel Config\n";
+    config += "# Copy this to your ~/.ssh/config\n";
+    config += "# ==========================================\n\n";
+
+    return config + servers.map((s, idx) => {
       // Host名にスペースが含まれる場合はハイフンに置換
       const hostAlias = s.name.replace(/\s+/g, '-');
-      return `Host ${hostAlias}\n    HostName ${s.ip}\n    User ${sshUser}\n    # Port 22\n`;
+      
+      // SSH接続先ホスト名:
+      // トンネルモード(localhost)になっている場合は originalIp を使用する
+      // originalIp がない場合(手動登録など)は ip をそのまま使う
+      let remoteHost = s.originalIp || s.ip;
+      
+      // ポート指定がある場合は除去 (例: 192.168.1.50:8000 -> 192.168.1.50)
+      if (remoteHost.includes(':')) {
+        remoteHost = remoteHost.split(':')[0];
+      }
+
+      const localPort = START_PORT + idx;
+
+      return `Host ${hostAlias}
+    HostName ${remoteHost}
+    User ${sshUser}
+    LocalForward ${localPort} localhost:8000
+    # Port 22
+`;
     }).join('\n');
   };
 
@@ -29,6 +56,37 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, servers,
     navigator.clipboard.writeText(generateSshConfig());
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleConvertToTunnelMode = () => {
+    if (servers.length === 0) return;
+    
+    if (!confirm(
+        "現在のサーバー設定を「SSHトンネルモード」に変換しますか？\n\n" +
+        "これにより、登録されているIPアドレスが全て 'localhost:18xxx' に書き換わります。\n" +
+        "事前に生成されたSSH Configを使ってSSH接続しておく必要があります。"
+    )) {
+      return;
+    }
+
+    const newConfigs = servers.map((s, idx) => {
+      const localPort = START_PORT + idx;
+      
+      // 現在のIPがlocalhost系でないなら、それを originalIp として保存する
+      // 既にlocalhostなら、既存の originalIp を引き継ぐ
+      const isLocalhost = s.ip.includes('localhost') || s.ip.includes('127.0.0.1');
+      const originalIp = isLocalhost ? s.originalIp : s.ip;
+
+      return {
+        name: s.name,
+        ip: `localhost:${localPort}`,
+        originalIp: originalIp
+      };
+    });
+
+    onImport(newConfigs);
+    alert("設定を更新しました。SSHトンネル経由で接続します。");
+    onClose();
   };
 
   const handleExport = () => {
@@ -92,6 +150,62 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, servers,
 
         <div className="p-6 overflow-y-auto space-y-8 custom-scrollbar">
             
+          {/* SSH Config Section (Priority) */}
+          <section>
+             <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+                <Terminal size={20} className="text-orange-400"/>
+                SSHポートフォワーディング (トンネル) 設定
+            </h3>
+            <div className="bg-gray-700/30 rounded-lg p-4 border border-gray-600/50">
+              <p className="text-sm text-gray-300 mb-4">
+                  ファイアウォールでPort 8000が見えない場合、SSHトンネルを使用してください。<br/>
+                  以下のConfigを使用すると、ローカルポート (18001~) を経由して安全に接続できます。
+              </p>
+
+              <div className="mb-4 flex items-center gap-3">
+                  <label className="text-sm text-gray-400 whitespace-nowrap">SSH Username:</label>
+                  <input 
+                      type="text" 
+                      value={sshUser}
+                      onChange={(e) => setSshUser(e.target.value)}
+                      className="bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 font-mono w-40"
+                  />
+              </div>
+
+              <div className="relative group mb-4">
+                  <pre className="bg-black/80 p-4 rounded-lg text-xs font-mono text-gray-300 h-48 overflow-y-auto border border-gray-700 whitespace-pre-wrap selection:bg-blue-500/50">
+                      {generateSshConfig()}
+                  </pre>
+                  <button 
+                      onClick={handleCopy}
+                      className="absolute top-2 right-2 p-2 bg-gray-700/80 hover:bg-gray-600 rounded text-gray-300 hover:text-white transition-all backdrop-blur-sm opacity-0 group-hover:opacity-100"
+                      title="クリップボードにコピー"
+                  >
+                      {copied ? <Check size={16} className="text-green-400"/> : <Copy size={16}/>}
+                  </button>
+              </div>
+
+              <div className="bg-black/20 p-4 rounded-lg border border-gray-600/30">
+                 <h4 className="text-sm font-bold text-blue-400 mb-2 flex items-center gap-2">
+                   <ArrowRightLeft size={16}/> アプリ設定の自動更新
+                 </h4>
+                 <p className="text-xs text-gray-400 mb-3">
+                   上記のSSH設定で接続した後、以下のボタンを押すと、
+                   このアプリの接続先設定を <code>localhost:18001...</code> に一括で書き換えます。
+                 </p>
+                 <button 
+                    onClick={handleConvertToTunnelMode}
+                    className="w-full py-2 bg-orange-700/80 hover:bg-orange-600 text-white rounded text-sm font-bold transition-colors flex items-center justify-center gap-2"
+                 >
+                    <ShieldCheck size={16}/>
+                    Update IPs to Localhost (Tunnel Mode)
+                 </button>
+              </div>
+            </div>
+          </section>
+
+          <hr className="border-gray-700" />
+
           {/* Backup / Restore Section */}
           <section>
             <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
@@ -100,8 +214,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, servers,
             </h3>
             <div className="bg-gray-700/30 rounded-lg p-4 border border-gray-600/50">
               <p className="text-sm text-gray-300 mb-4">
-                  登録済みサーバーリストをJSONファイルとして保存、または読み込みます。<br/>
-                  <span className="text-gray-400 text-xs">※通常、データはブラウザ(LocalStorage)に自動保存されますが、ブラウザ変更時やバックアップ用にご利用ください。</span>
+                  現在の設定をJSONファイルとして保存、または読み込みます。
               </p>
               
               <div className="flex flex-col sm:flex-row gap-4">
@@ -134,44 +247,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, servers,
             </div>
           </section>
 
-          <hr className="border-gray-700" />
-
-          {/* SSH Config Section */}
-          <section>
-             <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
-                <Terminal size={20} className="text-orange-400"/>
-                SSH Config 生成
-            </h3>
-            <div className="bg-gray-700/30 rounded-lg p-4 border border-gray-600/50">
-              <p className="text-sm text-gray-300 mb-4">
-                  登録サーバーの情報を <code>~/.ssh/config</code> 形式で生成します。
-                  これを貼り付ければ、<code>ssh {`{ServerName}`}</code> で接続できるようになります。
-              </p>
-
-              <div className="mb-4 flex items-center gap-3">
-                  <label className="text-sm text-gray-400 whitespace-nowrap">SSH Username:</label>
-                  <input 
-                      type="text" 
-                      value={sshUser}
-                      onChange={(e) => setSshUser(e.target.value)}
-                      className="bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 font-mono w-40"
-                  />
-              </div>
-
-              <div className="relative group">
-                  <pre className="bg-black/80 p-4 rounded-lg text-xs font-mono text-gray-300 h-48 overflow-y-auto border border-gray-700 whitespace-pre-wrap selection:bg-blue-500/50">
-                      {generateSshConfig()}
-                  </pre>
-                  <button 
-                      onClick={handleCopy}
-                      className="absolute top-2 right-2 p-2 bg-gray-700/80 hover:bg-gray-600 rounded text-gray-300 hover:text-white transition-all backdrop-blur-sm opacity-0 group-hover:opacity-100"
-                      title="クリップボードにコピー"
-                  >
-                      {copied ? <Check size={16} className="text-green-400"/> : <Copy size={16}/>}
-                  </button>
-              </div>
-            </div>
-          </section>
         </div>
       </div>
       <style>{`

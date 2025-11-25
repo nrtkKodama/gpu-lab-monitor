@@ -39,6 +39,7 @@ export interface ServerNode {
 export interface ServerConfig {
   name: string;
   ip: string;
+  originalIp?: string; // Stores the real remote IP if 'ip' is set to localhost (tunnel)
 }
 
 export enum ViewState {

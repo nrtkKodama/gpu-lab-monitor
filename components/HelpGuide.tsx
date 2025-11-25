@@ -26,29 +26,33 @@ const HelpGuide: React.FC<{onClose: () => void}> = ({ onClose }) => {
                  グローバルIP (例: <code>133.34.x.x</code>) のサーバーを追加した際にこのエラーが出る場合、
                  <strong>大学や組織のファイアウォールが Port 8000 を外部からブロックしています。</strong>
                </p>
-               <p className="text-sm mb-3">以下のいずれかの方法で解決してください。</p>
+               
+               <div className="bg-black/40 p-3 rounded mt-3">
+                 <p className="text-green-400 text-sm font-bold mb-2">【推奨】 SSHトンネルを使った解決手順</p>
+                 <ol className="list-decimal list-inside text-xs text-gray-300 space-y-2">
+                    <li>
+                        このアプリの右上の <strong>「設定」</strong> ボタンを開きます。
+                    </li>
+                    <li>
+                        <strong>「SSHポートフォワーディング」</strong> セクションのConfigをコピーし、手元のPCの <code>~/.ssh/config</code> に保存します。<br/>
+                        <span className="text-gray-500 ml-4">(自動的に <code>LocalForward 18001 localhost:8000</code> 等が設定されます)</span>
+                    </li>
+                    <li>
+                        ターミナルで対象サーバーにSSH接続します: <code className="bg-gray-800 px-1">ssh server-name</code><br/>
+                        <span className="text-gray-500 ml-4">(接続中はトンネルが有効になります)</span>
+                    </li>
+                    <li>
+                        アプリ設定画面に戻り、<strong>「Update IPs to Localhost」</strong> ボタンを押します。<br/>
+                        <span className="text-gray-500 ml-4">→ アプリ内の設定が <code>localhost:18001</code> に書き換わり、トンネル経由で通信できるようになります。</span>
+                    </li>
+                 </ol>
+               </div>
 
-               <div className="space-y-3">
-                 <div className="bg-black/40 p-3 rounded">
-                   <p className="text-green-400 text-xs font-bold mb-1">【推奨】 SSHトンネルを使う</p>
-                   <p className="text-xs text-gray-400 mb-2">
-                     手元のPCでSSHトンネルを掘り、ローカル経由でアクセスします。安全でファイアウォール変更も不要です。
-                   </p>
-                   <code className="block bg-black p-2 rounded text-xs font-mono text-gray-300 select-all">
-                     # 手元のPCのターミナルで実行 (ポート8001を使う例)<br/>
-                     ssh -L 8001:localhost:8000 user@133.34.xx.xx
-                   </code>
-                   <p className="text-xs text-gray-400 mt-2">
-                     → アプリの「Add Server」には <code className="text-white">localhost:8001</code> と入力して登録してください。
-                   </p>
-                 </div>
-
-                 <div className="bg-black/40 p-3 rounded">
+               <div className="bg-black/40 p-3 rounded mt-2">
                    <p className="text-orange-400 text-xs font-bold mb-1">【代替】 ngrokを使う</p>
                    <p className="text-xs text-gray-400">
                      GPUサーバー側で <code>ngrok http 8000</code> を実行し、発行されたURL (https://...) を登録してください。
                    </p>
-                 </div>
                </div>
              </div>
           </div>

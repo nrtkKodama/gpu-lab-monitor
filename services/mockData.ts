@@ -94,19 +94,33 @@ const fetchWithTimeout = async (url: string, timeoutMs: number) => {
 };
 
 export const fetchRealServerData = async (address: string, name: string): Promise<ServerNode> => {
-  const AGENT_PORT = 4274;
+  const AGENT_PORT = 8000;
   
-  // addressが "http" で始まらない場合は補完する
-  const targetUrl = address.startsWith('http') 
-    ? `${address}/metrics`
-    : `http://${address}:${AGENT_PORT}/metrics`;
+  let targetUrl = '';
+  
+  // URL生成ロジック:
+  // 1. httpスキームがなければ付与
+  // 2. ポート番号が指定されていなければデフォルト(8000)を付与
+  //    (localhost:18001 のようなトンネル接続に対応するため)
+  
+  if (address.startsWith('http')) {
+    targetUrl = `${address}/metrics`;
+  } else {
+    // IPv6などは考慮せず、簡易的にコロンの有無でポート指定を判定
+    const hasPort = address.includes(':');
+    if (hasPort) {
+      targetUrl = `http://${address}/metrics`;
+    } else {
+      targetUrl = `http://${address}:${AGENT_PORT}/metrics`;
+    }
+  }
 
   let jsonData: any = null;
   let isProxyUsed = false;
 
   try {
     // ---------------------------------------------------------
-    // 1. まず直接通信を試みる (LAN内PC用: 高速)
+    // 1. まず直接通信を試みる (LAN内PC用 / SSHトンネル localhost用)
     // ---------------------------------------------------------
     try {
       // タイムアウトを短く設定(1.5秒)して、ダメならすぐプロキシへ
@@ -188,8 +202,11 @@ export const fetchRealServerData = async (address: string, name: string): Promis
 export const testServerConnection = async (ip: string) => {
   // 1. Ping Check via Backend
   let pingOk = false;
+  // ポート番号が含まれている場合は除去してPingする (localhost:18001 -> localhost)
+  const hostOnly = ip.split(':')[0];
+  
   try {
-    const res = await fetch(`/api/sys-ping?target=${ip}`);
+    const res = await fetch(`/api/sys-ping?target=${hostOnly}`);
     if (res.ok) {
       const data = await res.json();
       pingOk = data.reachable;
@@ -207,7 +224,7 @@ export const testServerConnection = async (ip: string) => {
       agentOk = true;
       message = "接続成功: エージェントは正常に応答しています。";
     } else {
-      message = "エージェント応答なし (Port 4274を確認してください)";
+      message = "エージェント応答なし (Port 8000を確認してください)";
     }
   } catch (e) {
     message = String(e);
@@ -217,7 +234,7 @@ export const testServerConnection = async (ip: string) => {
   if (pingOk && agentOk) {
     return { success: true, message: "✅ Ping: OK, Agent: OK - 正常に監視可能です。" };
   } else if (pingOk && !agentOk) {
-    return { success: false, message: "⚠️ Ping: OK, Agent: NG - サーバーは存在しますが、エージェント(Port 4274)に繋がりません。ファイアウォール設定または monitor.py の起動状況を確認してください。" };
+    return { success: false, message: "⚠️ Ping: OK, Agent: NG - サーバーは存在しますが、エージェント(Port 8000)に繋がりません。ファイアウォール設定または monitor.py の起動状況を確認してください。" };
   } else if (!pingOk && agentOk) {
     // エージェントが見えているならPingが通らなくてもOK（ファイアウォール設定等）
     return { success: true, message: "✅ Ping: Blocked, Agent: OK - Pingは拒否されましたが、エージェントは応答しています。" };
