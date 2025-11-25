@@ -29,10 +29,10 @@ SSHログインやパスワード管理は不要。IPアドレスを登録する
 
 ```bash
 # プロジェクトをクローン
-git clone https://github.com/your-username/gpu-lab-monitor.git
+git clone https://github.com/nrtkKodama/gpu-monitor.git
 
 # ディレクトリに移動
-cd gpu-lab-monitor
+cd gpu-monitor
 ```
 
 ---
