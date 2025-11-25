@@ -264,7 +264,13 @@ sudo ufw reload
 ```bash
 curl http://localhost:8000/metrics
 ```
+#### setup_agant.shを使う場合
 
+```bash
+sed -i 's/\r$//' setup_agent.sh
+sed -i 's/\xC2\xA0/ /g' setup_agent.sh
+
+sudo bash setup_agent.sh
 ---
 
 ### Step 3: ダッシュボードアプリの起動 (管理者PC)
