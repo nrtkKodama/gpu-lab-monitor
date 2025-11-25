@@ -182,48 +182,28 @@ export const fetchRealServerData = async (address: string, name: string): Promis
 };
 
 /**
- * 実ネットワークスキャン関数
- * @param subnetPrefix "192.168.1" のような3オクテット
+ * 高速ネットワークスキャン
+ * 管理サーバー(Vite)の /api/scan エンドポイントを使用して、サーバー側で並列実行する
  */
 export const scanLocalNetwork = async (subnetPrefix: string): Promise<string[]> => {
-  const activeIps: string[] = [];
-  
-  // 1-254 のレンジをスキャン
-  const targets = Array.from({ length: 254 }, (_, i) => i + 1);
-  
-  // バッチサイズ: ブラウザの同時接続制限を考慮して小さめに分割
-  const BATCH_SIZE = 20;
-  
-  // スキャン用の軽量Fetch関数 (Timeout短め)
-  const checkHost = async (i: number): Promise<string | null> => {
-    const ip = `${subnetPrefix}.${i}`;
-    try {
-      // プロキシは使わず、まず直接通信を試みる（スキャンの高速化のため）
-      // ※注意: SSHポートフォワーディング環境では、直接通信が届かないため全滅する可能性がある。
-      // そのため、fetchRealServerDataを使って賢く判定するが、タイムアウトを極端に短くする。
-      
-      const result = await fetchRealServerData(ip, 'scan-temp');
-      if (result.status === 'online') {
-        return ip;
-      }
-    } catch (e) {
-      // ignore
-    }
-    return null;
-  };
-
-  // バッチ実行
-  for (let i = 0; i < targets.length; i += BATCH_SIZE) {
-    const batch = targets.slice(i, i + BATCH_SIZE);
-    const promises = batch.map(num => checkHost(num));
-    const results = await Promise.all(promises);
+  console.log(`Starting fast server-side scan for ${subnetPrefix}.x ...`);
+  try {
+    // ブラウザから1つずつFetchすると時間がかかるため、
+    // 管理サーバー(Node.js)に一括スキャンを依頼する
+    const res = await fetch(`/api/scan?subnet=${subnetPrefix}`);
     
-    results.forEach(ip => {
-      if (ip) activeIps.push(ip);
-    });
+    if (!res.ok) {
+      throw new Error(`Scan API error: ${res.status} ${res.statusText}`);
+    }
+    
+    const foundIps: string[] = await res.json();
+    return foundIps;
+    
+  } catch (e) {
+    console.error("Fast scan failed:", e);
+    // エラー時は空リストを返す
+    return [];
   }
-
-  return activeIps;
 };
 
 // ==========================================
