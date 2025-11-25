@@ -29,10 +29,10 @@ SSHログインやパスワード管理は不要。IPアドレスを登録する
 
 ```bash
 # プロジェクトをクローン
-git clone https://github.com/nrtkKodama/gpu-monitor.git
+git clone https://github.com/your-username/gpu-lab-monitor.git
 
 # ディレクトリに移動
-cd gpu-monitor
+cd gpu-lab-monitor
 ```
 
 ---
@@ -288,18 +288,20 @@ npm start
 
 ---
 
-### Step 4: Webサーバーへのデプロイ（任意）
+### Step 4: Webサーバーへのデプロイ
 
-このアプリを永続的にアクセス可能にするには、ビルドしてWebサーバーに配置します。
+このアプリを永続的にアクセス可能にする方法は2つあります。
 
+#### A. 研究室内のサーバーで配信する（推奨）
+研究室内のWebサーバー（nginxやApache）にビルドしたファイルを配置します。
 ```bash
 npm run build
+# build/ フォルダの中身をドキュメントルートへコピー
 ```
+※ 同じLAN内であればHTTP同士で通信できるため、トラブルが少ない最も推奨される方法です。
 
-`build/` フォルダの中に静的ファイル（HTML, CSS, JS）が生成されます。
-これを、**研究室内のWebサーバー（nginxやApache）のドキュメントルートに配置**してください。
+#### B. GitHub Pages で公開する
+インターネット上（`username.github.io`）から研究室内のサーバーを見に行きます。
+**HTTPSとHTTPの混在（Mixed Content）問題**への対処が必要になります。
 
-**⚠️ 重要: セキュリティの注意点**
-最近のブラウザは「Mixed Content（混合コンテンツ）」をブロックします。
-- このアプリを **HTTPS** (GitHub Pagesなど) で公開すると、 **HTTP** のGPUサーバーへの通信がブロックされます。
-- **推奨:** 研究室内のサーバーにて **HTTP** でこのアプリを配信するか、監視エージェント側もSSL化する必要があります。
+👉 **[詳細な手順と設定方法はこちらのドキュメントを参照してください](docs/GITHUB_PAGES.md)**
