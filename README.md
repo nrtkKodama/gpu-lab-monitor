@@ -266,7 +266,14 @@ curl http://localhost:8000/metrics
 ```
 
 ---
+#### setup_agant.shを使う場合
 
+```bash
+sed -i 's/\r$//' setup_agent.sh
+sed -i 's/\xC2\xA0/ /g' setup_agent.sh
+
+sudo bash setup_agent.sh
+```
 ### Step 3: ダッシュボードアプリの起動 (管理者PC)
 
 再び管理者PC（リポジトリをクローンしたPC）に戻ります。
@@ -291,7 +298,7 @@ npm start
 ## ❓ トラブルシューティング
 
 ### Q. IPアドレスを追加しても "Connection lost" になる
-1. **IPアドレスの確認:** 登録したIPが、アプリを開いているPCから到達可能か (`ping 192.168.1.XX`) 確認してください。
+1. **IPアドレスの確認:** 登録したIPが、アプリを開いているPCから到達可能か (`ping 192.168.1.XX`) 確認してください。(`curl http://192.168.1.XX:8000/metrics`)
 2. **ファイアウォール:** `ufw` 以外のファイアウォール（AWS Security Groupやfirewalld）を使用している場合は、TCP 8000を開放してください。
 3. **エージェント起動確認:** GPUサーバーで `sudo systemctl status gpu-monitor` を確認してください。
 4. **Mixed Content:** GitHub Pages (HTTPS) を使用している場合、HTTPのエージェントには接続できません。詳細は `docs/GITHUB_PAGES.md` を参照してください。
