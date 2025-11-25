@@ -1,6 +1,9 @@
 import { ServerNode, GPUInfo } from '../types';
 
-// Utilities to generate random realistic data for demo purposes
+// ==========================================
+// MOCK DATA GENERATOR (For Demo/Development)
+// ==========================================
+
 const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1) + min);
 
 const USERS = ['tanaka', 'suzuki', 'sato', 'research_group_a', 'matsumoto'];
@@ -43,7 +46,7 @@ const generateGPU = (index: number): GPUInfo => {
   };
 };
 
-export const fetchServerData = (ip: string, name: string): Promise<ServerNode> => {
+export const fetchMockServerData = (ip: string, name: string): Promise<ServerNode> => {
   return new Promise((resolve) => {
     // Simulate network latency
     setTimeout(() => {
@@ -62,8 +65,51 @@ export const fetchServerData = (ip: string, name: string): Promise<ServerNode> =
   });
 };
 
+// ==========================================
+// REAL API CLIENT (For Production)
+// ==========================================
+
+export const fetchRealServerData = async (ip: string, name: string): Promise<ServerNode> => {
+  try {
+    // Agent port is assumed to be 8000
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s timeout
+
+    const response = await fetch(`http://${ip}:8000/metrics`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`Error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    return {
+      id: ip,
+      ip,
+      name,
+      status: 'online',
+      lastUpdated: new Date().toLocaleTimeString(),
+      gpus: data.gpus || [], // Assuming backend returns { gpus: [...] }
+    };
+  } catch (error) {
+    console.error(`Failed to fetch from ${ip}:`, error);
+    return {
+      id: ip,
+      ip,
+      name,
+      status: 'offline', // or 'warning'
+      lastUpdated: new Date().toLocaleTimeString(),
+      gpus: [],
+    };
+  }
+};
+
 export const scanLocalNetwork = (): Promise<string[]> => {
-  // Simulating a network scan
+  // Browser cannot perform real network scans due to sandbox restrictions.
+  // In a real app, you might manually add IPs or fetch a list from a central registry.
   return new Promise((resolve) => {
     setTimeout(() => {
       resolve([
@@ -75,3 +121,13 @@ export const scanLocalNetwork = (): Promise<string[]> => {
     }, 1500);
   });
 };
+
+// ==========================================
+// EXPORT CONFIGURATION
+// ==========================================
+
+// Step 1: To use this app with real servers, comment out the line below:
+export const fetchServerData = fetchMockServerData;
+
+// Step 2: And uncomment the line below:
+// export const fetchServerData = fetchRealServerData;
