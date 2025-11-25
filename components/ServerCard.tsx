@@ -1,14 +1,15 @@
 import React from 'react';
 import { ServerNode } from '../types';
-import { Server, AlertTriangle, Cpu, Thermometer, Database, Layers } from 'lucide-react';
+import { Server, AlertTriangle, Cpu, Thermometer, Database, Layers, Edit2, Trash2 } from 'lucide-react';
 
 interface ServerCardProps {
   server: ServerNode;
   onClick: (server: ServerNode) => void;
   onRemove: (ip: string) => void;
+  onRename: (ip: string, newName: string) => void;
 }
 
-const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove }) => {
+const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove, onRename }) => {
   const isOnline = server.status === 'online';
   
   // Aggregate stats
@@ -47,6 +48,14 @@ const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove }) =>
     : memPercent > 70 
       ? 'bg-yellow-500' 
       : 'bg-blue-500';
+
+  const handleEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newName = window.prompt("新しいサーバー名を入力してください:", server.name);
+    if (newName && newName.trim() !== "") {
+      onRename(server.ip, newName.trim());
+    }
+  };
 
   return (
     <div 
@@ -133,14 +142,21 @@ const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove }) =>
         </div>
       )}
 
-      {/* Remove Button */}
-      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* Action Buttons (Hover) */}
+      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button 
+          onClick={handleEdit}
+          className="p-1.5 hover:bg-blue-500/20 rounded-md text-gray-600 hover:text-blue-400 transition-colors"
+          title="Rename Server"
+        >
+          <Edit2 size={14} />
+        </button>
         <button 
           onClick={(e) => { e.stopPropagation(); onRemove(server.ip); }}
           className="p-1.5 hover:bg-red-500/20 rounded-md text-gray-600 hover:text-red-400 transition-colors"
           title="Remove Server"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+          <Trash2 size={14} />
         </button>
       </div>
     </div>

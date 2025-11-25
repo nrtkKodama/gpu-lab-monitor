@@ -112,6 +112,13 @@ const App: React.FC = () => {
     }
   };
 
+  const handleRenameServer = (ip: string, newName: string) => {
+    const updated = savedServers.map(s => 
+      s.ip === ip ? { ...s, name: newName } : s
+    );
+    setSavedServers(updated);
+  };
+
   const handleScanLan = async () => {
     setShowScanModal(false);
     setIsScanning(true);
@@ -245,6 +252,7 @@ const App: React.FC = () => {
                       setViewState(ViewState.DETAIL);
                     }}
                     onRemove={handleRemoveServer}
+                    onRename={handleRenameServer}
                   />
                 ))}
               </div>
