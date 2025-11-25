@@ -4,7 +4,8 @@ import { fetchServerData, scanLocalNetwork, testServerConnection } from './servi
 import ServerCard from './components/ServerCard';
 import ServerDetail from './components/ServerDetail';
 import HelpGuide from './components/HelpGuide';
-import { LayoutDashboard, Plus, Network, HelpCircle, HardDrive, Search, Loader2, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import SettingsModal from './components/SettingsModal';
+import { LayoutDashboard, Plus, Network, HelpCircle, HardDrive, Search, Loader2, CheckCircle2, AlertTriangle, XCircle, Settings } from 'lucide-react';
 
 const App: React.FC = () => {
   // Persistence: Load servers from localStorage on boot
@@ -41,6 +42,9 @@ const App: React.FC = () => {
   const [newIp, setNewIp] = useState('');
   const [newName, setNewName] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  
+  // Settings State
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   
   // Connection Test State
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -156,6 +160,12 @@ const App: React.FC = () => {
             </div>
             <div className="flex items-center gap-4">
               <button 
+                onClick={() => setShowSettingsModal(true)}
+                className="text-gray-400 hover:text-white transition-colors flex items-center gap-1 text-sm"
+              >
+                <Settings size={18}/> 設定
+              </button>
+              <button 
                 onClick={() => setViewState(ViewState.HELP)}
                 className="text-gray-400 hover:text-white transition-colors flex items-center gap-1 text-sm"
               >
@@ -242,6 +252,14 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Settings Modal */}
+      <SettingsModal 
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        servers={savedServers}
+        onImport={(imported) => setSavedServers(imported)}
+      />
 
       {/* Scan Config Modal */}
       {showScanModal && (
