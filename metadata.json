@@ -1,0 +1,5 @@
+{
+  "name": "GPU Lab Monitor",
+  "description": "A research lab dashboard to monitor GPU utilization, temperatures, and Docker container owners across multiple servers.",
+  "requestFramePermissions": []
+}
