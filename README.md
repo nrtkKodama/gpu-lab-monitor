@@ -23,178 +23,38 @@ SSHログインやパスワード管理は不要。IPアドレスを登録する
 
 ## 🚀 セットアップ手順
 
-### Step 1: リポジトリのクローン (管理者PC)
+### Step 1: リポジトリのクローン
 
-まず、ソースコードをローカル環境にダウンロードします。
+管理者PC（閲覧用）および監視対象のGPUサーバーで、このリポジトリをクローンします。
 
 ```bash
-# プロジェクトをクローン
 git clone https://github.com/your-username/gpu-lab-monitor.git
-
-# ディレクトリに移動
 cd gpu-lab-monitor
 ```
 
 ---
 
-### Step 2: 監視エージェントの構築 (GPUサーバー側)
+### Step 2: 監視エージェントの起動 (GPUサーバー側)
 
 **※この作業は、監視したい全てのGPUサーバーで行ってください。**
 
-各サーバー上で「自分のステータスをJSONで返す」小さなWebサーバー（エージェント）を立ち上げます。
+リポジトリに含まれている `monitor.py` を実行して、GPU情報を配信するWebサーバーを立ち上げます。
 
 #### 1. 必要なPythonライブラリのインストール
 ```bash
 sudo apt update
 sudo apt install -y python3-pip
-pip3 install fastapi uvicorn
+pip3 install -r requirements.txt
 ```
+※ `requirements.txt` には `fastapi` と `uvicorn` が記載されています。
 
-#### 2. エージェントスクリプトの作成
-適当な場所（例: `/opt/gpu-monitor`）を作成し、以下のスクリプトを `monitor.py` として保存します。
-**このスクリプトは nvidia-smi が「N/A」を返した場合でもクラッシュしないように対策されています。**
+#### 2. エージェントの起動テスト
+以下のコマンドを実行し、エラーが出ないことを確認します。
 
-**ファイル: `/opt/gpu-monitor/monitor.py`**
-
-```python
-import subprocess
-import csv
-import io
-import json
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-app = FastAPI()
-
-# CORS設定: ブラウザからの直接アクセスを許可
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-def safe_int(val):
-    """'40 MiB', '[N/A]', 'Error' などを安全にintに変換"""
-    try:
-        # "40 MiB" -> "40"
-        cleaned = str(val).split()[0].strip()
-        return int(float(cleaned))
-    except:
-        return 0
-
-def safe_float(val):
-    """'45.5 W' などを安全にfloatに変換"""
-    try:
-        cleaned = str(val).split()[0].strip()
-        return float(cleaned)
-    except:
-        return 0.0
-
-def get_docker_map():
-    """実行中のDockerコンテナのPIDとメタデータをマッピング"""
-    docker_map = {}
-    try:
-        cmd = ["docker", "ps", "-q"]
-        container_ids = subprocess.check_output(cmd).decode().split()
-        if not container_ids: return {}
-
-        inspect_cmd = ["docker", "inspect", "--format", "{{.State.Pid}},{{.Name}},{{.Config.User}},{{.Config.Image}}"] + container_ids
-        output = subprocess.check_output(inspect_cmd).decode()
-        
-        for line in output.splitlines():
-            if not line.strip(): continue
-            parts = line.split(',')
-            if len(parts) >= 4:
-                pid = safe_int(parts[0])
-                name = parts[1].strip().lstrip('/')
-                user = parts[2].strip() or "root"
-                image = parts[3].strip()
-                docker_map[pid] = {"containerName": name, "user": user, "image": image}
-    except Exception as e:
-        print(f"Docker info fetch error: {e}")
-    return docker_map
-
-def get_gpu_processes():
-    """nvidia-smiからプロセス情報を取得し、Docker情報と結合"""
-    processes = []
-    docker_map = get_docker_map()
-
-    try:
-        cmd = ["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"]
-        output = subprocess.check_output(cmd).decode()
-        
-        for line in output.splitlines():
-            if not line.strip(): continue
-            parts = line.split(',')
-            pid = safe_int(parts[0])
-            proc_name = parts[1].strip()
-            mem_used = safe_int(parts[2])
-            
-            container_info = docker_map.get(pid)
-            user = container_info['user'] if container_info else "system"
-            container_name = container_info['containerName'] if container_info else None
-            
-            processes.append({
-                "pid": pid,
-                "type": "C",
-                "processName": proc_name,
-                "usedMemory": mem_used,
-                "user": user,
-                "containerName": container_name
-            })
-    except Exception:
-        pass # プロセスがない場合
-    return processes
-
-@app.get("/metrics")
-def metrics():
-    try:
-        cmd = [
-            "nvidia-smi",
-            "--query-gpu=index,name,utilization.gpu,utilization.memory,memory.total,memory.used,memory.free,temperature.gpu,power.draw,power.limit",
-            "--format=csv,noheader,nounits"
-        ]
-        res = subprocess.check_output(cmd).decode("utf-8")
-        reader = csv.reader(io.StringIO(res))
-        
-        gpus = []
-        all_processes = get_gpu_processes()
-
-        for row in reader:
-            if len(row) < 10: continue
-            
-            # 安全にパース
-            index = safe_int(row[0])
-            name = row[1].strip()
-            util_gpu = safe_int(row[2])
-            util_mem = safe_int(row[3])
-            mem_total = safe_int(row[4])
-            mem_used = safe_int(row[5])
-            mem_free = safe_int(row[6])
-            temp = safe_int(row[7])
-            power_draw = safe_int(row[8]) # Wattは整数表示で十分
-            power_limit = safe_int(row[9])
-
-            gpus.append({
-                "index": index,
-                "name": name,
-                "utilization": {"gpu": util_gpu, "memory": util_mem},
-                "memory": {"total": mem_total, "used": mem_used, "free": mem_free},
-                "temperature": temp,
-                "power": {"draw": power_draw, "limit": power_limit},
-                "processes": all_processes
-            })
-            
-        return {"status": "online", "gpus": gpus}
-        
-    except Exception as e:
-        return {"status": "error", "message": str(e), "gpus": []}
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+```bash
+python3 monitor.py
 ```
+成功すると `Uvicorn running on http://0.0.0.0:8000` と表示されます。
 
 #### 3. 自動起動の設定 (Systemd)
 
@@ -205,7 +65,8 @@ if __name__ == "__main__":
 sudo nano /etc/systemd/system/gpu-monitor.service
 ```
 
-以下の内容を貼り付けます：
+以下の内容を貼り付けます。
+**注意**: `/path/to/gpu-lab-monitor` の部分は、実際にcloneしたディレクトリのパス（例: `/home/labuser/gpu-lab-monitor`）に書き換えてください。
 
 ```ini
 [Unit]
@@ -214,7 +75,7 @@ After=network.target docker.service
 
 [Service]
 User=root
-WorkingDirectory=/opt/gpu-monitor
+WorkingDirectory=/path/to/gpu-lab-monitor
 ExecStart=/usr/local/bin/uvicorn monitor:app --host 0.0.0.0 --port 8000
 Restart=always
 
@@ -234,20 +95,14 @@ sudo systemctl start gpu-monitor
 
 ### Step 3: ダッシュボードアプリの起動 (管理者PC)
 
-再び管理者PC（リポジトリをクローンしたPC）に戻ります。
+管理者PC（ダッシュボードを表示したいPC）で以下を実行します。
 
 #### 1. 依存ライブラリのインストール
 ```bash
 npm install
 ```
 
-#### 2. モード設定について
-デフォルト設定では「実サーバーモード」になっています。
-すでに Python エージェントを起動していれば、設定変更なしで動作します。
-
-#### 3. アプリの起動
-開発モードで起動します。
-
+#### 2. アプリの起動
 ```bash
 npm start
 ```
