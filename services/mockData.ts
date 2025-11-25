@@ -94,7 +94,7 @@ const fetchWithTimeout = async (url: string, timeoutMs: number) => {
 };
 
 export const fetchRealServerData = async (address: string, name: string): Promise<ServerNode> => {
-  const AGENT_PORT = 8000;
+  const AGENT_PORT = 4274;
   
   // addressが "http" で始まらない場合は補完する
   const targetUrl = address.startsWith('http') 
@@ -207,7 +207,7 @@ export const testServerConnection = async (ip: string) => {
       agentOk = true;
       message = "接続成功: エージェントは正常に応答しています。";
     } else {
-      message = "エージェント応答なし (Port 8000を確認してください)";
+      message = "エージェント応答なし (Port 4274を確認してください)";
     }
   } catch (e) {
     message = String(e);
@@ -217,7 +217,7 @@ export const testServerConnection = async (ip: string) => {
   if (pingOk && agentOk) {
     return { success: true, message: "✅ Ping: OK, Agent: OK - 正常に監視可能です。" };
   } else if (pingOk && !agentOk) {
-    return { success: false, message: "⚠️ Ping: OK, Agent: NG - サーバーは存在しますが、エージェント(Port 8000)に繋がりません。ファイアウォール設定または monitor.py の起動状況を確認してください。" };
+    return { success: false, message: "⚠️ Ping: OK, Agent: NG - サーバーは存在しますが、エージェント(Port 4274)に繋がりません。ファイアウォール設定または monitor.py の起動状況を確認してください。" };
   } else if (!pingOk && agentOk) {
     // エージェントが見えているならPingが通らなくてもOK（ファイアウォール設定等）
     return { success: true, message: "✅ Ping: Blocked, Agent: OK - Pingは拒否されましたが、エージェントは応答しています。" };
