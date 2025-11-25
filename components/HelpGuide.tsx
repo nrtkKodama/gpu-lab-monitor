@@ -1,15 +1,59 @@
 import React from 'react';
-import { Terminal, Settings, Save, Server, Shield, Globe, HelpCircle } from 'lucide-react';
+import { Terminal, Settings, Save, Server, Shield, Globe, HelpCircle, AlertTriangle, PlayCircle } from 'lucide-react';
 
 const HelpGuide: React.FC<{onClose: () => void}> = ({ onClose }) => {
   return (
-    <div className="bg-gray-800 rounded-xl p-8 max-w-4xl mx-auto shadow-2xl border border-gray-700 text-gray-300 leading-relaxed">
+    <div className="bg-gray-800 rounded-xl p-8 max-w-4xl mx-auto shadow-2xl border border-gray-700 text-gray-300 leading-relaxed overflow-y-auto max-h-[85vh] custom-scrollbar">
       <div className="flex justify-between items-start mb-8 border-b border-gray-700 pb-4">
         <h1 className="text-3xl font-bold text-white">システムセットアップ & デプロイガイド</h1>
         <button onClick={onClose} className="text-gray-400 hover:text-white">✕ 閉じる</button>
       </div>
 
       <div className="space-y-8">
+        
+        {/* Troubleshooting Section (Priority) */}
+        <section className="bg-red-900/20 border border-red-800/50 rounded-lg p-5">
+           <h2 className="text-xl font-bold text-red-200 mb-4 flex items-center gap-2">
+            <AlertTriangle size={20} className="text-red-400"/> トラブルシューティング
+          </h2>
+          
+          <div className="space-y-4">
+             <div className="bg-gray-900/50 p-4 rounded border border-gray-700">
+               <h3 className="text-white font-bold text-sm mb-2 flex items-center gap-2">
+                 ⚠️ Ping: OK, Agent: NG となる場合 (グローバルIP等)
+               </h3>
+               <p className="text-sm mb-2">
+                 グローバルIP (例: <code>133.34.x.x</code>) のサーバーを追加した際にこのエラーが出る場合、
+                 <strong>大学や組織のファイアウォールが Port 8000 を外部からブロックしています。</strong>
+               </p>
+               <p className="text-sm mb-3">以下のいずれかの方法で解決してください。</p>
+
+               <div className="space-y-3">
+                 <div className="bg-black/40 p-3 rounded">
+                   <p className="text-green-400 text-xs font-bold mb-1">【推奨】 SSHトンネルを使う</p>
+                   <p className="text-xs text-gray-400 mb-2">
+                     手元のPCでSSHトンネルを掘り、ローカル経由でアクセスします。安全でファイアウォール変更も不要です。
+                   </p>
+                   <code className="block bg-black p-2 rounded text-xs font-mono text-gray-300 select-all">
+                     # 手元のPCのターミナルで実行 (ポート8001を使う例)<br/>
+                     ssh -L 8001:localhost:8000 user@133.34.xx.xx
+                   </code>
+                   <p className="text-xs text-gray-400 mt-2">
+                     → アプリの「Add Server」には <code className="text-white">localhost:8001</code> と入力して登録してください。
+                   </p>
+                 </div>
+
+                 <div className="bg-black/40 p-3 rounded">
+                   <p className="text-orange-400 text-xs font-bold mb-1">【代替】 ngrokを使う</p>
+                   <p className="text-xs text-gray-400">
+                     GPUサーバー側で <code>ngrok http 8000</code> を実行し、発行されたURL (https://...) を登録してください。
+                   </p>
+                 </div>
+               </div>
+             </div>
+          </div>
+        </section>
+
         <section>
           <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
             <HelpCircle size={20} className="text-pink-400"/> よくある質問: パスワードは不要？
@@ -23,7 +67,7 @@ const HelpGuide: React.FC<{onClose: () => void}> = ({ onClose }) => {
             <ul className="list-disc list-inside text-sm space-y-1 text-gray-300">
               <li>Webサイトを閲覧するのにパスワードが不要なのと同様に、各サーバーの状況（API）にアクセスするだけなので認証は必須ではありません。</li>
               <li>情報の「閲覧」のみが可能で、サーバーの再起動や停止などの「操作」はできないため、セキュリティリスクは限定的です。</li>
-              <li>※研究室外からアクセスさせたい場合などは、VPNを通すか、別途Basic認証などをPythonスクリプトに追加することを推奨します。</li>
+              <li>※研究室外からアクセスさせたい場合などは、VPNを通すか、Basic認証などを導入してください。</li>
             </ul>
           </div>
         </section>
@@ -36,11 +80,11 @@ const HelpGuide: React.FC<{onClose: () => void}> = ({ onClose }) => {
             このアプリケーションはフロントエンド(React)です。実際のGPUデータを取得するには、各監視対象サーバーで軽量なバックエンドAPIを実行する必要があります。
           </p>
           <div className="bg-gray-900 p-4 rounded-lg font-mono text-xs overflow-x-auto border border-gray-700">
-            [GPU Server 1] (Agent Running on :8000) <br/>
-            &nbsp;&nbsp;↳ nvidia-smiの結果を JSON で配信 (http://192.168.1.xxx:8000/metrics) <br/>
+            [GPU Server] (Agent Running on :8000) <br/>
+            &nbsp;&nbsp;↳ nvidia-smiの結果を JSON で配信 (http://IP:8000/metrics) <br/>
             <br/>
             [Dashboard PC] (This App) <br/>
-            &nbsp;&nbsp;↳ ブラウザが直接 各GPU Server のURLを叩いてデータを取得・表示 <br/>
+            &nbsp;&nbsp;↳ ブラウザまたは管理サーバー経由でデータを取得・表示 <br/>
           </div>
         </section>
 
@@ -49,70 +93,19 @@ const HelpGuide: React.FC<{onClose: () => void}> = ({ onClose }) => {
             <Terminal size={20} className="text-green-400"/> 2. サーバー側エージェントのセットアップ
           </h2>
           <p className="mb-4">
-            各GPUサーバーで以下のPythonスクリプト(例: <code>monitor.py</code>)を実行してください。
-            これにより、<code>nvidia-smi</code> と <code>docker</code> の情報をJSONで配信します。
+            各GPUサーバーで以下のPythonスクリプト(<code>monitor.py</code>)を実行してください。
+            <br/>
+            <span className="text-sm text-gray-400">※詳細なセットアップ手順はREADME.mdを参照してください。</span>
           </p>
-          <pre className="bg-black text-green-400 p-4 rounded-lg font-mono text-sm overflow-x-auto">
-{`from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-import subprocess
-import json
-
-app = FastAPI()
-
-# CORS設定: ブラウザからの直接アクセスを許可
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.get("/metrics")
-def get_metrics():
-    # 本来はここで nvidia-smi コマンドなどを実行してパースします
-    # セキュリティ向上のため、ここにトークンチェックを入れることも可能です
-    return {
-        "status": "online",
-        "gpus": [
-            # nvidia-smiの出力結果をここにマッピング
-        ]
-    }
-
-# 実行コマンド: uvicorn monitor:app --host 0.0.0.0 --port 8000`}
-          </pre>
+          <div className="bg-black/30 p-3 rounded border border-gray-600">
+            <p className="text-sm font-bold text-green-400 mb-2">起動コマンド:</p>
+            <code className="font-mono text-sm text-gray-300">python3 monitor.py</code>
+          </div>
         </section>
 
         <section>
           <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-            <Shield size={20} className="text-orange-400"/> 3. 再起動後の永続化 (Systemd)
-          </h2>
-          <p className="mb-4">
-            サーバー再起動後も自動的に監視エージェントが立ち上がるように、<code>systemd</code>を設定します。
-            ファイル: <code>/etc/systemd/system/gpu-monitor.service</code>
-          </p>
-          <pre className="bg-gray-900 p-4 rounded-lg font-mono text-sm text-gray-300 border border-gray-700">
-{`[Unit]
-Description=GPU Monitoring API Agent
-After=network.target docker.service
-
-[Service]
-User=root
-WorkingDirectory=/opt/gpu-monitor
-ExecStart=/usr/local/bin/uvicorn monitor:app --host 0.0.0.0 --port 8000
-Restart=always
-
-[Install]
-WantedBy=multi-user.target`}
-          </pre>
-          <p className="mt-2 text-sm text-gray-400">
-            設定後、<code>sudo systemctl enable gpu-monitor && sudo systemctl start gpu-monitor</code> を実行してください。
-          </p>
-        </section>
-
-        <section>
-          <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-            <Globe size={20} className="text-indigo-400"/> 4. Webデプロイ時の注意 (Mixed Content)
+            <Globe size={20} className="text-indigo-400"/> 3. Webデプロイ時の注意 (Mixed Content)
           </h2>
           <div className="bg-yellow-900/30 border border-yellow-700/50 p-4 rounded-lg">
             <h3 className="font-bold text-yellow-500 mb-2">⚠️ HTTPSとHTTPの混在について</h3>
@@ -127,6 +120,12 @@ WantedBy=multi-user.target`}
           </div>
         </section>
       </div>
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(31, 41, 55, 0.5); }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(75, 85, 99, 0.8); border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(107, 114, 128, 1); }
+      `}</style>
     </div>
   );
 };

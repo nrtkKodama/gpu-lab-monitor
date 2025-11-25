@@ -1,6 +1,6 @@
 import React from 'react';
 import { ServerNode } from '../types';
-import { Server, AlertTriangle, Cpu, Thermometer, Database } from 'lucide-react';
+import { Server, AlertTriangle, Cpu, Thermometer, Database, Layers } from 'lucide-react';
 
 interface ServerCardProps {
   server: ServerNode;
@@ -30,8 +30,9 @@ const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove }) =>
   const usedMemMiB = server.gpus.reduce((acc, g) => acc + g.memory.used, 0);
   
   // Convert to GB for display
-  const totalMemGB = (totalMemMiB / 1024).toFixed(0);
-  const usedMemGB = (usedMemMiB / 1024).toFixed(1);
+  const totalMemGB = totalMemMiB > 0 ? (totalMemMiB / 1024).toFixed(0) : '0';
+  const usedMemGB = totalMemMiB > 0 ? (usedMemMiB / 1024).toFixed(1) : '0';
+  const memPercent = totalMemMiB > 0 ? Math.round((usedMemMiB / totalMemMiB) * 100) : 0;
   
   // Card border color based on status
   const statusColor = !isOnline 
@@ -40,8 +41,12 @@ const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove }) =>
       ? 'bg-orange-900/10 border-orange-800/50' 
       : 'bg-gray-800 border-gray-700 hover:border-gray-500';
 
-  // Text color for availability
-  const availabilityColor = freeGpus > 0 ? 'text-green-400' : 'text-gray-500';
+  // Bar color based on memory usage
+  const memBarColor = memPercent > 90 
+    ? 'bg-red-500' 
+    : memPercent > 70 
+      ? 'bg-yellow-500' 
+      : 'bg-blue-500';
 
   return (
     <div 
@@ -67,30 +72,39 @@ const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove }) =>
       {isOnline ? (
         <div className="space-y-4">
           
-          {/* Main Metric: Available GPUs */}
-          <div className="bg-gray-900/50 rounded-lg p-3 border border-gray-700/50 text-center">
-            <div className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">Available GPUs</div>
-            <div className="flex items-baseline justify-center gap-1.5">
-              <span className={`text-3xl font-black font-mono ${availabilityColor}`}>
-                {freeGpus}
-              </span>
-              <span className="text-gray-500 text-sm font-medium">/ {totalGpus}</span>
+          {/* Main Metric: Memory Usage Bar */}
+          <div className="bg-gray-900/50 rounded-lg p-3 border border-gray-700/50">
+            <div className="flex justify-between items-end mb-1">
+              <div className="text-gray-400 text-[10px] uppercase font-bold tracking-widest flex items-center gap-1">
+                <Database size={10} /> Total Memory
+              </div>
+              <div className="text-xs font-mono text-gray-400">
+                <span className="text-gray-200 font-bold">{usedMemGB}</span> / {totalMemGB} GB
+              </div>
             </div>
-            {freeGpus === 0 && (
-              <p className="text-[10px] text-red-400 mt-1 font-medium">Fully Occupied</p>
-            )}
-            {freeGpus > 0 && freeGpus === totalGpus && (
-              <p className="text-[10px] text-green-500/70 mt-1 font-medium">All Free</p>
-            )}
+            
+            <div className="flex items-end gap-2 mb-2">
+              <span className="text-3xl font-black font-mono text-gray-200">
+                {memPercent}<span className="text-sm text-gray-500 ml-0.5">%</span>
+              </span>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="w-full bg-gray-700 h-2.5 rounded-full overflow-hidden">
+              <div 
+                className={`h-full transition-all duration-500 ease-out ${memBarColor}`} 
+                style={{ width: `${memPercent}%` }}
+              ></div>
+            </div>
           </div>
 
           {/* Secondary Metrics Grid */}
           <div className="grid grid-cols-3 gap-2 text-xs">
-            {/* Memory Usage */}
+            {/* Available GPUs */}
             <div className="bg-gray-800/50 rounded p-2 flex flex-col justify-center items-center border border-gray-700/30">
-               <span className="text-gray-500 flex items-center gap-1 mb-0.5"><Database size={12}/> Memory</span>
-               <span className="font-mono font-bold text-gray-300">
-                 {usedMemGB} <span className="text-[10px] text-gray-500 font-normal">/ {totalMemGB} GB</span>
+               <span className="text-gray-500 flex items-center gap-1 mb-0.5"><Layers size={12}/> Free GPUs</span>
+               <span className={`font-mono font-bold ${freeGpus > 0 ? 'text-green-400' : 'text-gray-500'}`}>
+                 {freeGpus} <span className="text-[10px] text-gray-500 font-normal">/ {totalGpus}</span>
                </span>
             </div>
 
@@ -113,7 +127,7 @@ const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove }) =>
 
         </div>
       ) : (
-        <div className="h-28 flex flex-col items-center justify-center text-gray-500 text-sm italic bg-gray-900/20 rounded-lg border border-gray-800 border-dashed">
+        <div className="h-32 flex flex-col items-center justify-center text-gray-500 text-sm italic bg-gray-900/20 rounded-lg border border-gray-800 border-dashed">
           <AlertTriangle size={20} className="mb-2 opacity-50"/>
           <span>Connection lost</span>
         </div>
