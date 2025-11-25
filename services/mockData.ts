@@ -72,10 +72,13 @@ export const fetchMockServerData = (ip: string, name: string): Promise<ServerNod
 export const fetchRealServerData = async (ip: string, name: string): Promise<ServerNode> => {
   try {
     // Agent port is assumed to be 8000
+    // Note: If you deploy agent on a different port, update it here.
+    const AGENT_PORT = 8000;
+    
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s timeout
 
-    const response = await fetch(`http://${ip}:8000/metrics`, {
+    const response = await fetch(`http://${ip}:${AGENT_PORT}/metrics`, {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
@@ -126,8 +129,12 @@ export const scanLocalNetwork = (): Promise<string[]> => {
 // EXPORT CONFIGURATION
 // ==========================================
 
-// Step 1: To use this app with real servers, comment out the line below:
+// [MODE SELECTION]
+// デモデータ(Mock)を使用するか、実機(Real)と通信するかをここで切り替えます。
+// Toggle comment out to switch modes.
+
+// 1. デモモード (開発用 - サーバー不要)
 export const fetchServerData = fetchMockServerData;
 
-// Step 2: And uncomment the line below:
+// 2. 本番モード (実機用 - Pythonエージェントが必要)
 // export const fetchServerData = fetchRealServerData;

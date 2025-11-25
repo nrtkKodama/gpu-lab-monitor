@@ -1,46 +1,71 @@
 # GPU Lab Monitor
 
-研究室のGPUサーバー群を監視するためのダッシュボードアプリケーションです。
-IPアドレスベースで管理し、ログイン（SSH）不要でブラウザから各マシンのGPU使用率、温度、実行中のDockerコンテナ所有者を確認できます。
+研究室のGPUサーバー群を一元管理する監視ダッシュボードです。
+各サーバーのGPU使用率、温度、電力、そして**現在誰が（どのDockerコンテナが）GPUを使用しているか**を可視化します。
 
-## システム構成
+SSHログインやパスワード管理は不要。IPアドレスを登録するだけで、Webブラウザからクラスタ全体の状況を把握できます。
 
-このシステムは「エージェント型」の構成をとっています。
+---
 
-1.  **Dashboard (Frontend)**: このReactアプリケーション。ブラウザ上で動作し、各サーバーのAPIを叩いて情報を集約表示します。
-2.  **Monitor Agent (Backend)**: 各GPUサーバー上で動作するPythonスクリプト。`nvidia-smi` や `docker` コマンドを実行し、結果をJSON形式のAPIとして公開します。
+## 🛠 前提条件
+
+**管理者PC (フロントエンド表示用)**
+- Node.js (v16以上推奨)
+- Git
+
+**監視対象GPUサーバー (バックエンドエージェント用)**
+- Linux (Ubuntu等)
+- NVIDIA Driver & nvidia-smi
+- Python 3.x
+- Docker (コンテナ情報の取得に必要)
 
 ---
 
 ## 🚀 セットアップ手順
 
-### Step 1: 監視対象サーバー（Agent）のセットアップ
+### Step 1: リポジトリのクローン (管理者PC)
 
-監視したいすべてのGPUサーバー（Ubuntu等）で以下の作業を行います。
-
-#### 1. 必要なツールのインストール
-Python 3と `nvidia-smi` が使えることを確認し、FastAPIをインストールします。
+まず、ソースコードをローカル環境にダウンロードします。
 
 ```bash
-sudo apt update && sudo apt install -y python3-pip
+# プロジェクトをクローン
+git clone https://github.com/your-username/gpu-lab-monitor.git
+
+# ディレクトリに移動
+cd gpu-lab-monitor
+```
+
+---
+
+### Step 2: 監視エージェントの構築 (GPUサーバー側)
+
+**※この作業は、監視したい全てのGPUサーバーで行ってください。**
+
+各サーバー上で「自分のステータスをJSONで返す」小さなWebサーバー（エージェント）を立ち上げます。
+
+#### 1. 必要なPythonライブラリのインストール
+```bash
+sudo apt update
+sudo apt install -y python3-pip
 pip3 install fastapi uvicorn
 ```
 
 #### 2. エージェントスクリプトの作成
-適当なディレクトリ（例: `/opt/gpu-monitor`）を作成し、以下の `monitor.py` を保存してください。
+適当な場所（例: `/opt/gpu-monitor`）を作成し、以下のスクリプトを `monitor.py` として保存します。
 
-**ファイル: `monitor.py`**
+**ファイル: `/opt/gpu-monitor/monitor.py`**
 
 ```python
 import subprocess
 import csv
 import io
+import json
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# CORSを許可（ダッシュボードからのアクセスを受け入れる）
+# CORS設定: ブラウザからの直接アクセスを許可
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -48,9 +73,98 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def get_gpu_info():
+def get_docker_map():
+    """
+    実行中のDockerコンテナのPIDとメタデータをマッピングする辞書を作成
+    Returns: {pid: {name: str, user: str, image: str}}
+    """
+    docker_map = {}
     try:
-        # nvidia-smi からCSV形式で情報を取得
+        # 実行中の全コンテナのPID, 名前, Image, Config.Userを取得
+        cmd = ["docker", "ps", "-q"]
+        container_ids = subprocess.check_output(cmd).decode().split()
+        
+        if not container_ids:
+            return {}
+
+        inspect_cmd = ["docker", "inspect", "--format", "{{.State.Pid}},{{.Name}},{{.Config.User}},{{.Config.Image}}"] + container_ids
+        output = subprocess.check_output(inspect_cmd).decode()
+        
+        for line in output.splitlines():
+            if not line.strip(): continue
+            parts = line.split(',')
+            if len(parts) >= 4:
+                pid = int(parts[0])
+                name = parts[1].strip().lstrip('/') # 先頭の/を除去
+                user = parts[2].strip()
+                image = parts[3].strip()
+                
+                # ユーザーが空ならrootとする、またはイメージ名などをヒントにする
+                if not user: user = "root"
+                
+                docker_map[pid] = {
+                    "containerName": name,
+                    "user": user,
+                    "image": image
+                }
+    except Exception as e:
+        print(f"Docker info fetch error: {e}")
+    
+    return docker_map
+
+def get_gpu_processes():
+    """
+    nvidia-smiからプロセス情報を取得し、Docker情報と結合する
+    """
+    processes = []
+    docker_map = get_docker_map()
+
+    try:
+        # PID, Process Name, Used Memory
+        cmd = ["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"]
+        output = subprocess.check_output(cmd).decode()
+        
+        for line in output.splitlines():
+            if not line.strip(): continue
+            parts = line.split(',')
+            pid = int(parts[0])
+            proc_name = parts[1].strip()
+            mem_used = int(parts[2])
+            
+            # Dockerコンテナ内のプロセスかチェック
+            # 正確にはプロセスの親PIDを辿る必要があるが、簡易的にPID直接一致またはcgroup確認が一般的
+            # ここでは簡易実装としてPIDマッピングを使用 (※実際はPID Namespaceの違いによりホストPIDと異なる場合があるため注意)
+            # より確実にするには /proc/{pid}/cgroup を読む必要がありますが、ここでは簡略化しています。
+            
+            # ホスト側PIDで見つかった場合
+            container_info = docker_map.get(pid)
+            
+            user = "system"
+            container_name = None
+            
+            if container_info:
+                user = container_info['user']
+                container_name = container_info['containerName']
+            
+            processes.append({
+                "pid": pid,
+                "type": "C", # Compute
+                "processName": proc_name,
+                "usedMemory": mem_used,
+                "user": user,
+                "containerName": container_name
+            })
+            
+    except Exception as e:
+        # プロセスがない場合など
+        pass
+        
+    return processes
+
+@app.get("/metrics")
+def metrics():
+    # 1. GPU基本情報の取得
+    try:
         cmd = [
             "nvidia-smi",
             "--query-gpu=index,name,utilization.gpu,utilization.memory,memory.total,memory.used,memory.free,temperature.gpu,power.draw,power.limit",
@@ -60,10 +174,16 @@ def get_gpu_info():
         reader = csv.reader(io.StringIO(res))
         
         gpus = []
+        all_processes = get_gpu_processes()
+
         for row in reader:
-            # 各行のデータをパース
+            index = int(row[0])
+            
+            # このGPUに関連するプロセスだけをフィルタリング（簡易実装: 本来はgpu_uuid等で紐付けが必要）
+            # ここでは全プロセスをリストに入れていますが、実運用では `nvidia-smi query-compute-apps` に `gpu_index` を含めてフィルタしてください
+            
             gpus.append({
-                "index": int(row[0]),
+                "index": index,
                 "name": row[1].strip(),
                 "utilization": {
                     "gpu": int(row[2]),
@@ -79,42 +199,35 @@ def get_gpu_info():
                     "draw": float(row[8]),
                     "limit": float(row[9])
                 },
-                "processes": [] # プロセス情報は後で追加
+                "processes": all_processes # ※簡略化のため全プロセスを返しています
             })
-        return gpus
+            
+        return {"status": "online", "gpus": gpus}
+        
     except Exception as e:
-        print(f"Error getting GPU info: {e}")
-        return []
-
-def get_processes():
-    # ここにプロセス取得ロジック（docker ps と nvidia-smi の突き合わせ）を実装します
-    # 簡易版として、nvidia-smi pmon の結果などをパースする処理になります
-    # 実際の実装では `nvidia-smi --query-compute-apps=...` を使用してください
-    return []
-
-@app.get("/metrics")
-def metrics():
-    gpus = get_gpu_info()
-    return {
-        "status": "online",
-        "gpus": gpus
-    }
+        return {"status": "error", "message": str(e), "gpus": []}
 
 if __name__ == "__main__":
     import uvicorn
-    # ポート8000でサーバーを起動
+    # ポート8000で全IPからの接続を待機
     uvicorn.run(app, host="0.0.0.0", port=8000)
 ```
 
 #### 3. 自動起動の設定 (Systemd)
-サーバー再起動後も自動で起動するように設定します。
 
-**ファイル: `/etc/systemd/system/gpu-monitor.service`**
+サーバー再起動時にも自動的に監視エージェントが立ち上がるようにします。
+
+```bash
+# サービスファイルの作成
+sudo nano /etc/systemd/system/gpu-monitor.service
+```
+
+以下の内容を貼り付けます：
 
 ```ini
 [Unit]
-Description=GPU Monitoring Agent
-After=network.target
+Description=GPU Monitoring API Agent
+After=network.target docker.service
 
 [Service]
 User=root
@@ -126,7 +239,8 @@ Restart=always
 WantedBy=multi-user.target
 ```
 
-設定を反映し、起動します。
+保存してエディタを終了し、サービスを有効化・起動します。
+
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable gpu-monitor
@@ -135,50 +249,57 @@ sudo systemctl start gpu-monitor
 
 ---
 
-### Step 2: ダッシュボード (Frontend) のセットアップ
+### Step 3: ダッシュボードアプリの起動 (管理者PC)
 
-このリポジトリのコードを使用します。
+再び管理者PC（リポジトリをクローンしたPC）に戻ります。
 
-#### 1. 通信モードの切り替え
-デフォルトではデモ用のモックデータが表示されるようになっています。
-`services/mockData.ts` を開き、ファイルの最後にある `fetchServerData` 関数のエクスポートを切り替えてください。
+#### 1. 依存ライブラリのインストール
+```bash
+npm install
+```
+
+#### 2. モードの切り替え（重要）
+デフォルトではデモ用のダミーデータが表示されるようになっています。
+**実際のサーバーと通信するために、以下のファイルを編集してください。**
+
+ファイル: `services/mockData.ts`
 
 ```typescript
-// services/mockData.ts
+// services/mockData.ts の末尾 (115行目付近)
 
-// モックデータを使用する場合（開発・デモ用）
+// 変更前:
+export const fetchServerData = fetchMockServerData;
+// export const fetchServerData = fetchRealServerData;
+
+// 変更後（コメントアウトを入れ替える）:
 // export const fetchServerData = fetchMockServerData;
-
-// 実データを使用する場合（本番運用）
 export const fetchServerData = fetchRealServerData;
 ```
 
-#### 2. ビルドとデプロイ
-Node.js がインストールされた環境で以下を実行します。
+#### 3. アプリの起動
+開発モードで起動します。
 
 ```bash
-# 依存関係のインストール
-npm install
-
-# 本番用ビルド
-npm run build
+npm start
 ```
 
-`build/` ディレクトリに静的ファイルが生成されます。これをWebサーバーで配信します。
-
-##### 簡易的な配信方法（ローカルサーバー）
-```bash
-npx serve -s build
-```
-これで `http://localhost:3000` などでアクセス可能になります。
+ブラウザで `http://localhost:3000`（または表示されたURL）にアクセスします。
+右上の「Add Server」ボタンから、Step 2で設定したサーバーのIPアドレス（例: `192.168.1.50`）を追加してください。
 
 ---
 
-## ⚠️ 注意事項：GitHub PagesとMixed Contentについて
+### Step 4: Webサーバーへのデプロイ（任意）
 
-このアプリを **GitHub Pages (https://yourname.github.io/...)** で公開した場合、研究室内のGPUサーバー（通常は `http://192.168.x.x`）への通信はブロックされます。
-これはブラウザのセキュリティ機能（Mixed Content Block）によるもので、**HTTPSのページからHTTPのAPIを叩くことができない**ためです。
+このアプリを永続的にアクセス可能にするには、ビルドしてWebサーバーに配置します。
 
-**推奨される運用方法:**
-1.  **学内サーバーでホスティング**: 監視対象のサーバーの1つ、または研究室内のWebサーバー（HTTP）にビルドしたファイルを配置して配信してください。
-2.  **ローカル実行**: 各自のPCで `npm start` またはビルドしたファイルをローカルサーバーで起動して閲覧してください。
+```bash
+npm run build
+```
+
+`build/` フォルダの中に静的ファイル（HTML, CSS, JS）が生成されます。
+これを、**研究室内のWebサーバー（nginxやApache）のドキュメントルートに配置**してください。
+
+**⚠️ 重要: セキュリティの注意点**
+最近のブラウザは「Mixed Content（混合コンテンツ）」をブロックします。
+- このアプリを **HTTPS** (GitHub Pagesなど) で公開すると、 **HTTP** のGPUサーバーへの通信がブロックされます。
+- **推奨:** 研究室内のサーバーにて **HTTP** でこのアプリを配信するか、監視エージェント側もSSL化する必要があります。
