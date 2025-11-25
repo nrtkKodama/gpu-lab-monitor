@@ -126,7 +126,7 @@ export const fetchRealServerData = async (address: string, name: string): Promis
       const proxyUrl = `/api/proxy?target=${encodeURIComponent(targetUrl)}`;
       isProxyUsed = true;
       
-      const res = await fetchWithTimeout(proxyUrl, 8000); // 8秒タイムアウト
+      const res = await fetchWithTimeout(proxyUrl, 10000); // 10秒タイムアウト(重い処理のため)
       
       if (!res.ok) {
         throw new Error(`Proxy Error: ${res.status} ${res.statusText}`);
@@ -152,17 +152,23 @@ export const fetchRealServerData = async (address: string, name: string): Promis
   } catch (error) {
     // Error Handling & Logging
     let msg = String(error);
+    let isTimeout = false;
+    
     if (error instanceof Error) {
       if (error.name === 'AbortError') {
         msg = isProxyUsed 
-          ? 'Connection Timed Out (via Proxy)' 
-          : 'Connection Timed Out';
+          ? 'Timeout (Proxy)' 
+          : 'Timeout';
+        isTimeout = true;
       } else {
         msg = error.message;
       }
     }
 
-    console.warn(`[GPU-Monitor] Failed to fetch from ${address}:`, msg);
+    if (!isTimeout) {
+      // タイムアウト以外のエラーはコンソールに出してデバッグしやすくする
+      console.warn(`[GPU-Monitor] Failed to fetch from ${address}:`, msg);
+    }
     
     return {
       id: address,
@@ -175,15 +181,49 @@ export const fetchRealServerData = async (address: string, name: string): Promis
   }
 };
 
-export const scanLocalNetwork = (): Promise<string[]> => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve([
-        '192.168.1.101',
-        '192.168.1.105',
-      ]);
-    }, 1500);
-  });
+/**
+ * 実ネットワークスキャン関数
+ * @param subnetPrefix "192.168.1" のような3オクテット
+ */
+export const scanLocalNetwork = async (subnetPrefix: string): Promise<string[]> => {
+  const activeIps: string[] = [];
+  
+  // 1-254 のレンジをスキャン
+  const targets = Array.from({ length: 254 }, (_, i) => i + 1);
+  
+  // バッチサイズ: ブラウザの同時接続制限を考慮して小さめに分割
+  const BATCH_SIZE = 20;
+  
+  // スキャン用の軽量Fetch関数 (Timeout短め)
+  const checkHost = async (i: number): Promise<string | null> => {
+    const ip = `${subnetPrefix}.${i}`;
+    try {
+      // プロキシは使わず、まず直接通信を試みる（スキャンの高速化のため）
+      // ※注意: SSHポートフォワーディング環境では、直接通信が届かないため全滅する可能性がある。
+      // そのため、fetchRealServerDataを使って賢く判定するが、タイムアウトを極端に短くする。
+      
+      const result = await fetchRealServerData(ip, 'scan-temp');
+      if (result.status === 'online') {
+        return ip;
+      }
+    } catch (e) {
+      // ignore
+    }
+    return null;
+  };
+
+  // バッチ実行
+  for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+    const batch = targets.slice(i, i + BATCH_SIZE);
+    const promises = batch.map(num => checkHost(num));
+    const results = await Promise.all(promises);
+    
+    results.forEach(ip => {
+      if (ip) activeIps.push(ip);
+    });
+  }
+
+  return activeIps;
 };
 
 // ==========================================

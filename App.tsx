@@ -4,7 +4,7 @@ import { fetchServerData, scanLocalNetwork } from './services/mockData';
 import ServerCard from './components/ServerCard';
 import ServerDetail from './components/ServerDetail';
 import HelpGuide from './components/HelpGuide';
-import { LayoutDashboard, Plus, Network, HelpCircle, HardDrive } from 'lucide-react';
+import { LayoutDashboard, Plus, Network, HelpCircle, HardDrive, Search, Loader2 } from 'lucide-react';
 
 const App: React.FC = () => {
   // Persistence: Load servers from localStorage on boot
@@ -31,7 +31,11 @@ const App: React.FC = () => {
   const [servers, setServers] = useState<ServerNode[]>([]);
   const [viewState, setViewState] = useState<ViewState>(ViewState.DASHBOARD);
   const [selectedServer, setSelectedServer] = useState<ServerNode | null>(null);
+  
+  // Scan State
   const [isScanning, setIsScanning] = useState(false);
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [scanPrefix, setScanPrefix] = useState('192.168.1');
   
   // Add Server Form State
   const [newIp, setNewIp] = useState('');
@@ -86,9 +90,18 @@ const App: React.FC = () => {
   };
 
   const handleScanLan = async () => {
+    setShowScanModal(false);
     setIsScanning(true);
     try {
-      const foundIps = await scanLocalNetwork();
+      // User specified prefix check
+      const prefix = scanPrefix.trim();
+      if (!prefix.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+        alert("IPプレフィックスの形式が正しくありません。\n例: 192.168.1");
+        setIsScanning(false);
+        return;
+      }
+
+      const foundIps = await scanLocalNetwork(prefix);
       const existingIps = savedServers.map(s => s.ip);
       const uniqueNew = foundIps.filter(ip => !existingIps.includes(ip));
       
@@ -98,8 +111,11 @@ const App: React.FC = () => {
           setSavedServers([...savedServers, ...newConfigs]);
         }
       } else {
-        alert("新しいデバイスは見つかりませんでした。");
+        alert(`スキャン完了: 範囲 ${prefix}.1 - 254\n新しいデバイスは見つかりませんでした。\n(ファイアウォールでポート8000が許可されているか確認してください)`);
       }
+    } catch (e) {
+      console.error(e);
+      alert("スキャン中にエラーが発生しました。");
     } finally {
       setIsScanning(false);
     }
@@ -159,11 +175,11 @@ const App: React.FC = () => {
               </div>
               <div className="flex gap-3">
                 <button 
-                  onClick={handleScanLan}
+                  onClick={() => setShowScanModal(true)}
                   disabled={isScanning}
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded-lg text-sm transition-all hover:border-gray-600"
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded-lg text-sm transition-all hover:border-gray-600 disabled:opacity-50"
                 >
-                  <Network size={16} className={isScanning ? "animate-pulse" : ""} />
+                  {isScanning ? <Loader2 size={16} className="animate-spin"/> : <Network size={16} />}
                   {isScanning ? 'Scanning...' : 'Scan LAN'}
                 </button>
                 <button 
@@ -207,6 +223,57 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Scan Config Modal */}
+      {showScanModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-800 rounded-xl p-6 w-full max-w-md border border-gray-700 shadow-2xl">
+            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+              <Search size={24} className="text-blue-400" />
+              LANスキャン設定
+            </h3>
+            
+            <div className="space-y-4">
+              <p className="text-sm text-gray-400">
+                指定されたサブネットの <code>.1</code> ～ <code>.254</code> に対して、GPU監視エージェント(Port 8000)の応答を確認します。
+              </p>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">IP Prefix (第3オクテットまで)</label>
+                <div className="flex items-center">
+                  <input 
+                    type="text" 
+                    placeholder="例: 192.168.1"
+                    className="flex-1 bg-gray-900 border border-gray-600 rounded-l-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 outline-none font-mono tracking-wide"
+                    value={scanPrefix}
+                    onChange={(e) => setScanPrefix(e.target.value)}
+                  />
+                  <span className="bg-gray-700 border border-l-0 border-gray-600 rounded-r-lg px-3 py-2 text-gray-400 font-mono">
+                    .x
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  ※ブラウザの制限により、スキャンには数秒〜数十秒かかる場合があります。
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-8">
+              <button 
+                onClick={() => setShowScanModal(false)}
+                className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleScanLan}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium"
+              >
+                Start Scan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Server Modal */}
       {showAddModal && (
