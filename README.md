@@ -124,16 +124,15 @@ def get_gpu_processes():
         # gpu_index, pid, process_name, used_memory
         cmd = ["nvidia-smi", "--query-compute-apps=gpu_index,pid,process_name,used_memory", "--format=csv,noheader,nounits"]
         output = subprocess.check_output(cmd).decode()
+        reader = csv.reader(io.StringIO(output))
         
-        for line in output.splitlines():
-            if not line.strip(): continue
-            parts = line.split(',')
-            if len(parts) < 4: continue
+        for row in reader:
+            if len(row) < 4: continue
             
-            gpu_idx = safe_int(parts[0])
-            pid = safe_int(parts[1])
-            proc_name = parts[2].strip()
-            mem_used = safe_int(parts[3])
+            gpu_idx = safe_int(row[0])
+            pid = safe_int(row[1])
+            proc_name = row[2].strip()
+            mem_used = safe_int(row[3])
             
             container_info = docker_map.get(pid)
             user = container_info['user'] if container_info else "system"

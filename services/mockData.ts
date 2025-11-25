@@ -78,18 +78,18 @@ export const fetchMockServerData = (ip: string, name: string): Promise<ServerNod
 // ==========================================
 
 export const fetchRealServerData = async (address: string, name: string): Promise<ServerNode> => {
-  try {
-    const AGENT_PORT = 8000;
-    
-    // addressが "http" で始まらない場合は補完する
-    // ngrokのURLなどが直接入力された場合に対応
-    const url = address.startsWith('http') 
-      ? `${address}/metrics`
-      : `http://${address}:${AGENT_PORT}/metrics`;
-    
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+  const AGENT_PORT = 8000;
+  
+  // addressが "http" で始まらない場合は補完する
+  const url = address.startsWith('http') 
+    ? `${address}/metrics`
+    : `http://${address}:${AGENT_PORT}/metrics`;
+  
+  const controller = new AbortController();
+  // nvidia-smiが遅い場合を考慮して10秒に延長
+  const timeoutId = setTimeout(() => controller.abort(), 10000); 
 
+  try {
     const response = await fetch(url, {
       signal: controller.signal
     });
@@ -103,22 +103,32 @@ export const fetchRealServerData = async (address: string, name: string): Promis
     
     return {
       id: address,
-      ip: address, // Display raw input as IP/Host
+      ip: address, 
       name: name,
       status: 'online',
       lastUpdated: new Date().toLocaleTimeString(),
       gpus: data.gpus || [], 
     };
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
+    // Error Handling & Logging
+    let msg = String(error);
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        msg = 'Connection Timed Out (10s limit exceeded)';
+      } else {
+        msg = error.message;
+      }
+    }
+
     console.warn(`[GPU-Monitor] Failed to fetch from ${address}:`, msg);
     
     // Check for common errors to give hints in Console
-    if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+    if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('Timed Out')) {
       console.info(`💡 HINT for ${address}:`);
-      console.info(`1. Is monitor.py running? (Try: curl http://${address}:8000/metrics)`);
-      console.info(`2. Is port 8000 open? (Try: sudo ufw allow 8000)`);
-      console.info(`3. Mixed Content? If you are on HTTPS, you cannot call HTTP ip. See docs.`);
+      console.info(`1. Is monitor.py running? (Try in terminal: curl ${url})`);
+      console.info(`2. Is port 8000 open? (Try: sudo ufw allow 8000/tcp)`);
+      console.info(`3. Is the IP address correct and reachable?`);
+      console.info(`4. Mixed Content? If you are on HTTPS, you cannot call HTTP ip.`);
     }
 
     return {
