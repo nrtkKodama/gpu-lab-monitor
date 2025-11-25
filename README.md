@@ -215,7 +215,7 @@ After=network.target docker.service
 [Service]
 User=root
 WorkingDirectory=/opt/gpu-monitor
-ExecStart=/usr/local/bin/uvicorn monitor:app --host 0.0.0.0 --port 8000
+ExecStart=uvicorn monitor:app --host 0.0.0.0 --port 8000
 Restart=always
 
 [Install]
