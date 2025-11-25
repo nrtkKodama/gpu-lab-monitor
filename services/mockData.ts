@@ -77,44 +77,86 @@ export const fetchMockServerData = (ip: string, name: string): Promise<ServerNod
 // REAL API CLIENT
 // ==========================================
 
+/**
+ * タイムアウト付きFetchラッパー
+ */
+const fetchWithTimeout = async (url: string, timeoutMs: number) => {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(id);
+    return res;
+  } catch (e) {
+    clearTimeout(id);
+    throw e;
+  }
+};
+
 export const fetchRealServerData = async (address: string, name: string): Promise<ServerNode> => {
   const AGENT_PORT = 8000;
   
   // addressが "http" で始まらない場合は補完する
-  const url = address.startsWith('http') 
+  const targetUrl = address.startsWith('http') 
     ? `${address}/metrics`
     : `http://${address}:${AGENT_PORT}/metrics`;
-  
-  const controller = new AbortController();
-  // nvidia-smiが遅い場合を考慮して10秒に延長
-  const timeoutId = setTimeout(() => controller.abort(), 10000); 
+
+  let jsonData: any = null;
+  let isProxyUsed = false;
 
   try {
-    const response = await fetch(url, {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
+    // ---------------------------------------------------------
+    // 1. まず直接通信を試みる (LAN内PC用: 高速)
+    // ---------------------------------------------------------
+    try {
+      // タイムアウトを短く設定(1.5秒)して、ダメならすぐプロキシへ
+      const res = await fetchWithTimeout(targetUrl, 1500);
+      if (res.ok) {
+        jsonData = await res.json();
+      }
+    } catch (e) {
+      // Direct access fail is expected if client is remote. Ignore error and fallback.
     }
 
-    const data = await response.json();
-    
+    // ---------------------------------------------------------
+    // 2. 失敗した場合、管理サーバー経由(Proxy)で試みる (SSHトンネル/リモート用)
+    // ---------------------------------------------------------
+    if (!jsonData) {
+      // プロキシURL: 現在のページホスト(localhost:3000)のAPIを叩く
+      const proxyUrl = `/api/proxy?target=${encodeURIComponent(targetUrl)}`;
+      isProxyUsed = true;
+      
+      const res = await fetchWithTimeout(proxyUrl, 8000); // 8秒タイムアウト
+      
+      if (!res.ok) {
+        throw new Error(`Proxy Error: ${res.status} ${res.statusText}`);
+      }
+      jsonData = await res.json();
+      
+      // プロキシ自体がエラーJSONを返してきた場合
+      if (jsonData.status === 'error' && jsonData.message) {
+        throw new Error(`Proxy Upstream Error: ${jsonData.message}`);
+      }
+    }
+
+    // データ整形
     return {
       id: address,
       ip: address, 
       name: name,
       status: 'online',
       lastUpdated: new Date().toLocaleTimeString(),
-      gpus: data.gpus || [], 
+      gpus: jsonData.gpus || [], 
     };
+
   } catch (error) {
     // Error Handling & Logging
     let msg = String(error);
     if (error instanceof Error) {
       if (error.name === 'AbortError') {
-        msg = 'Connection Timed Out (10s limit exceeded)';
+        msg = isProxyUsed 
+          ? 'Connection Timed Out (via Proxy)' 
+          : 'Connection Timed Out';
       } else {
         msg = error.message;
       }
@@ -122,20 +164,11 @@ export const fetchRealServerData = async (address: string, name: string): Promis
 
     console.warn(`[GPU-Monitor] Failed to fetch from ${address}:`, msg);
     
-    // Check for common errors to give hints in Console
-    if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('Timed Out')) {
-      console.info(`💡 HINT for ${address}:`);
-      console.info(`1. Is monitor.py running? (Try in terminal: curl ${url})`);
-      console.info(`2. Is port 8000 open? (Try: sudo ufw allow 8000/tcp)`);
-      console.info(`3. Is the IP address correct and reachable?`);
-      console.info(`4. Mixed Content? If you are on HTTPS, you cannot call HTTP ip.`);
-    }
-
     return {
       id: address,
       ip: address,
       name: name,
-      status: 'offline', 
+      status: 'offline', // warning ではなく offline にして分かりやすく
       lastUpdated: new Date().toLocaleTimeString(),
       gpus: [],
     };
