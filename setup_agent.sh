@@ -1,36 +1,49 @@
 #!/bin/bash
 
-# エラーが発生したら中断する
+# エラーが発生したら即座に停止
 set -e
 
-# ルート権限のチェック
+# ルート権限チェック
 if [ "$EUID" -ne 0 ]; then
   echo "❌ エラー: このスクリプトはroot権限（sudo）で実行してください。"
   exit 1
 fi
 
+APP_DIR="/opt/gpu-monitor"
+VENV_DIR="$APP_DIR/venv"
+
 echo "=========================================="
-echo "🚀 GPU Lab Monitor エージェントセットアップ"
+echo "🚀 GPU Lab Monitor エージェントセットアップ (Venv版)"
 echo "=========================================="
 
-# 1. 必要なパッケージのインストール
-echo "📦 [1/5] システムパッケージとPythonライブラリをインストール中..."
+# 1. システムパッケージのインストール
+echo "📦 [1/6] 必要なシステムパッケージをインストール中..."
 apt-get update -qq
-apt-get install -y -qq python3 python3-pip
+# python3-venv を追加
+apt-get install -y -qq python3 python3-pip python3-venv
 
-# pipでのインストール (UbuntuのバージョンによるPEP 668エラー回避のため --break-system-packages を試行)
-echo "   -> Pythonライブラリ (FastAPI, Uvicorn) をインストール中..."
-if ! pip3 install fastapi "uvicorn[standard]" > /dev/null 2>&1; then
-    # 最近のUbuntuなどで外部管理エラーが出る場合のフォールバック
-    pip3 install fastapi "uvicorn[standard]" --break-system-packages
+# 2. ディレクトリ作成
+echo "📂 [2/6] アプリケーションディレクトリを作成中 ($APP_DIR)..."
+mkdir -p "$APP_DIR"
+
+# 3. 仮想環境(venv)の作成
+echo "🐍 [3/6] Python仮想環境を作成中..."
+if [ ! -d "$VENV_DIR" ]; then
+    python3 -m venv "$VENV_DIR"
+    echo "   -> 仮想環境を作成しました: $VENV_DIR"
+else
+    echo "   -> 既存の仮想環境を使用します"
 fi
 
-# 2. ディレクトリとファイルの作成
-echo "📂 [2/5] アプリケーションディレクトリを作成中 (/opt/gpu-monitor)..."
-mkdir -p /opt/gpu-monitor
+# 4. pipパッケージのインストール (仮想環境内)
+echo "⬇️  [4/6] ライブラリをインストール中 (FastAPI, Uvicorn)..."
+# 仮想環境内のpipを使用することでシステム環境を汚さない
+"$VENV_DIR/bin/pip" install --upgrade pip -q
+"$VENV_DIR/bin/pip" install fastapi "uvicorn[standard]" -q
 
-echo "📝    -> monitor.py を作成中..."
-cat << 'EOF' > /opt/gpu-monitor/monitor.py
+# 5. monitor.py の作成 (※CORSバグ修正済み版)
+echo "📝 [5/6] monitor.py を配置中..."
+cat << 'EOF' > "$APP_DIR/monitor.py"
 import subprocess
 import csv
 import io
@@ -41,7 +54,7 @@ from typing import List, Dict, Any
 
 app = FastAPI()
 
-# CORS設定: ブラウザや管理サーバーからのアクセスを許可
+# CORS設定: 互換性のため allow_private_network は除外
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -64,7 +77,6 @@ def safe_int(value: Any) -> int:
 def get_docker_owner(pid: str) -> Dict[str, str]:
     """PIDからDockerコンテナの所有者と名前を特定する"""
     try:
-        # 1. cgroupからコンテナIDを取得
         with open(f"/proc/{pid}/cgroup", "r") as f:
             cgroup_content = f.read()
             
@@ -79,7 +91,6 @@ def get_docker_owner(pid: str) -> Dict[str, str]:
         if not container_id:
             return {"user": "system", "container": ""}
 
-        # 2. docker inspectで詳細を取得
         result = subprocess.run(
             ["docker", "inspect", "--format", "{{.Name}}|{{.Config.User}}", container_id],
             capture_output=True, text=True
@@ -101,7 +112,6 @@ def root():
 @app.get("/metrics")
 def get_metrics():
     try:
-        # nvidia-smiでGPU情報をCSV形式で取得
         cmd = [
             "nvidia-smi", 
             "--query-gpu=index,name,utilization.gpu,utilization.memory,memory.total,memory.used,memory.free,temperature.gpu,power.draw,power.limit", 
@@ -119,7 +129,6 @@ def get_metrics():
             if len(row) < 10: continue
             index = safe_int(row[0])
             
-            # 各GPUで実行中のプロセス情報を取得
             proc_cmd = [
                 "nvidia-smi", 
                 "--query-compute-apps=gpu_uuid,pid,process_name,used_memory", 
@@ -134,7 +143,6 @@ def get_metrics():
                 for p_row in proc_reader:
                     if len(p_row) < 4: continue
                     pid = p_row[1].strip()
-                    # Docker情報の特定を試みる
                     docker_info = get_docker_owner(pid)
                     
                     processes.append({
@@ -172,54 +180,51 @@ def get_metrics():
         return {"status": "error", "message": str(e), "gpus": []}
 
 if __name__ == "__main__":
+    # 仮想環境内であれば uvicorn はそのまま呼び出せるが
+    # スクリプト直接実行時はライブラリ呼び出しになる
     uvicorn.run(app, host="0.0.0.0", port=8000)
 EOF
 
-# 3. Systemdサービスの作成
-echo "⚙️ [3/5] 自動起動設定 (Systemd) を構成中..."
-cat << 'EOF' > /etc/systemd/system/gpu-monitor.service
+# 6. Systemdサービスの作成 (仮想環境のPythonを指定)
+echo "⚙️ [6/6] 自動起動設定を更新中..."
+cat << EOF > /etc/systemd/system/gpu-monitor.service
 [Unit]
 Description=GPU Monitoring API Agent
 After=network.target docker.service
 
 [Service]
 User=root
-WorkingDirectory=/opt/gpu-monitor
-ExecStart=/usr/bin/python3 monitor.py
+WorkingDirectory=$APP_DIR
+# 重要: 仮想環境内のPythonバイナリを使用
+ExecStart=$VENV_DIR/bin/python monitor.py
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-echo "   -> サービスを起動中..."
+echo "   -> サービスを再起動中..."
 systemctl daemon-reload
 systemctl enable gpu-monitor
 systemctl restart gpu-monitor
 
-# 4. ファイアウォールの設定
-echo "🛡 [4/5] ファイアウォール設定 (ポート8000開放)..."
+# ファイアウォール確認
 if command -v ufw > /dev/null; then
     ufw allow 8000/tcp > /dev/null
-    echo "   -> UFW設定完了"
-else
-    echo "   -> UFWが見つかりませんでした。iptables等を使用している場合は手動でTCP 8000を開放してください。"
 fi
 
-# 5. 動作確認
-echo "✅ [5/5] 動作確認中..."
-sleep 2 # 起動待ち
+# 動作確認
+echo "✅ セットアップ完了。動作確認中..."
+sleep 2
 
 if curl -s http://localhost:8000/metrics | grep -q "online"; then
     echo ""
-    echo "🎉 セットアップが正常に完了しました！"
+    echo "🎉 成功！Venv環境で正常に動作しています。"
     echo "-----------------------------------------------------"
-    echo "IPアドレスを確認し、管理者PCのダッシュボードに追加してください:"
-    hostname -I | awk '{print $1}'
+    echo "IPアドレス: $(hostname -I | awk '{print $1}')"
     echo "-----------------------------------------------------"
 else
     echo ""
-    echo "⚠️ 警告: サービスはインストールされましたが、応答確認に失敗しました。"
-    echo "以下のコマンドでステータスを確認してください:"
-    echo "sudo systemctl status gpu-monitor"
+    echo "⚠️ 警告: 応答がありません。ログを確認してください:"
+    echo "sudo journalctl -u gpu-monitor -n 20 --no-pager"
 fi
