@@ -107,18 +107,32 @@ const attemptFetchTarget = async (address: string, name: string): Promise<any> =
     }
   }
 
+  // Check if we are running on a remote/public domain (e.g., ngrok)
+  const isLocalClient = window.location.hostname === 'localhost' || 
+                        window.location.hostname === '127.0.0.1' ||
+                        window.location.hostname.startsWith('192.168.');
+
+  // If we are external (ngrok), attempting to fetch private LAN IP directly will fail/timeout.
+  // Skip direct fetch to save time and go straight to proxy.
+  const shouldSkipDirect = !isLocalClient && 
+                           !address.includes('localhost') && 
+                           !address.includes('127.0.0.1') &&
+                           (address.startsWith('192.168.') || address.startsWith('172.') || address.startsWith('10.'));
+
   // 1. Direct Fetch
-  try {
-    const res = await fetchWithTimeout(targetUrl, 1500);
-    if (res.ok) {
-      const json = await res.json();
-      return json;
+  if (!shouldSkipDirect) {
+    try {
+      const res = await fetchWithTimeout(targetUrl, 1500);
+      if (res.ok) {
+        const json = await res.json();
+        return json;
+      }
+    } catch (e) {
+      // Direct failed, proceed to proxy
     }
-  } catch (e) {
-    // Direct failed, proceed to proxy
   }
 
-  // 2. Proxy Fetch
+  // 2. Proxy Fetch (Fallback or Primary for remote access)
   const proxyUrl = `/api/proxy?target=${encodeURIComponent(targetUrl)}`;
   const res = await fetchWithTimeout(proxyUrl, 5000); 
   if (!res.ok) {
