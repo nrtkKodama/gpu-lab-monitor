@@ -18,7 +18,7 @@ const USERS = ['tanaka', 'suzuki', 'sato', 'research_group_a', 'matsumoto'];
 const CONTAINERS = ['pytorch_training_v1', 'llm_finetune', 'stable_diffusion_inf', 'jupyter_lab_cuda11'];
 const GPU_NAMES = ['NVIDIA A100-SXM4-40GB', 'NVIDIA GeForce RTX 3090', 'NVIDIA RTX A6000'];
 
-const generateProcess = (gpuIndex: number) => {
+const generateProcess = (_gpuIndex: number) => {
   const isDocker = Math.random() > 0.3;
   return {
     pid: randomInt(1000, 99999),
@@ -95,8 +95,9 @@ const fetchWithTimeout = async (url: string, timeoutMs: number) => {
 /**
  * Attempts to fetch metrics from a target address.
  */
-const attemptFetchTarget = async (address: string, name: string): Promise<any> => {
+const attemptFetchTarget = async (rawAddress: string, name: string): Promise<any> => {
   const AGENT_PORT = 8000;
+  const address = rawAddress.trim(); // Trim spaces to avoid errors
   let targetUrl = '';
   
   // Ensure protocol is present
@@ -131,7 +132,9 @@ const attemptFetchTarget = async (address: string, name: string): Promise<any> =
     const proxyUrl = `/api/proxy?target=${encodeURIComponent(targetUrl)}`;
     const res = await fetchWithTimeout(proxyUrl, 10000); // Increased from 5000 to 10s
     if (!res.ok) {
-      throw new Error(`Proxy status: ${res.status} ${res.statusText}`);
+      // Try to read error body if available
+      const text = await res.text().catch(() => "");
+      throw new Error(`Proxy status: ${res.status} ${res.statusText} ${text}`);
     }
     return await res.json();
   } catch (e) {
@@ -178,8 +181,9 @@ export const fetchRealServerData = async (config: ServerConfig): Promise<ServerN
 };
 
 export const testServerConnection = async (ip: string) => {
+  const cleanIp = ip.trim();
   let pingOk = false;
-  const hostOnly = ip.split(':')[0];
+  const hostOnly = cleanIp.split(':')[0];
   
   try {
     const res = await fetch(`/api/sys-ping?target=${hostOnly}`);
@@ -192,18 +196,14 @@ export const testServerConnection = async (ip: string) => {
   }
 
   let agentOk = false;
-  let message = "";
   try {
     // Test uses a temporary config object
-    const data = await fetchRealServerData({ id: 'test', name: "Test", ip: ip });
+    const data = await fetchRealServerData({ id: 'test', name: "Test", ip: cleanIp });
     if (data.status === 'online') {
       agentOk = true;
-      message = "接続成功: エージェントは正常に応答しています。";
-    } else {
-      message = "エージェント応答なし (Port 8000を確認してください)";
     }
   } catch (e) {
-    message = String(e);
+    console.error(e);
   }
 
   if (pingOk && agentOk) {

@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import http from 'node:http';
 import { exec } from 'node:child_process';
-import process from 'node:process';
+import { platform } from 'node:process';
 
 export default defineConfig({
   plugins: [
@@ -14,7 +14,10 @@ export default defineConfig({
         // 1. 高速LANスキャン API
         // =========================================
         server.middlewares.use('/api/scan', async (req, res, next) => {
-          const urlObj = new URL(req.url || '', `http://${req.headers.host}`);
+          // Robustly determine base URL
+          const protocol = req.headers['x-forwarded-proto'] || 'http';
+          const host = req.headers.host || 'localhost';
+          const urlObj = new URL(req.url || '', `${protocol}://${host}`);
           const subnet = urlObj.searchParams.get('subnet'); // 例: "192.168.1"
 
           if (!subnet) {
@@ -68,7 +71,9 @@ export default defineConfig({
         // 2. システムPing API (接続診断用)
         // =========================================
         server.middlewares.use('/api/sys-ping', (req, res, next) => {
-           const urlObj = new URL(req.url || '', `http://${req.headers.host}`);
+           const protocol = req.headers['x-forwarded-proto'] || 'http';
+           const host = req.headers.host || 'localhost';
+           const urlObj = new URL(req.url || '', `${protocol}://${host}`);
            const target = urlObj.searchParams.get('target');
            
            if (!target) {
@@ -85,7 +90,7 @@ export default defineConfig({
            }
            
            // OS判定してPingコマンドを決定
-           const isWin = process.platform === 'win32';
+           const isWin = platform === 'win32';
            const cmd = isWin 
              ? `ping -n 1 -w 2000 ${target}` 
              : `ping -c 1 -W 2 ${target}`;
@@ -105,7 +110,9 @@ export default defineConfig({
         // 3. プロキシ API (native http モジュール版)
         // =========================================
         server.middlewares.use('/api/proxy', (req, res, next) => {
-          const urlObj = new URL(req.url || '', `http://${req.headers.host}`);
+          const protocol = req.headers['x-forwarded-proto'] || 'http';
+          const host = req.headers.host || 'localhost';
+          const urlObj = new URL(req.url || '', `${protocol}://${host}`);
           const target = urlObj.searchParams.get('target');
 
           if (!target) {
@@ -113,10 +120,34 @@ export default defineConfig({
             return;
           }
 
-          // Use native http.get instead of fetch for compatibility
-          const proxyReq = http.get(target, (proxyRes) => {
+          // Validate target URL
+          try {
+            new URL(target);
+          } catch (e) {
+            res.statusCode = 400;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'Invalid target URL' }));
+            return;
+          }
+
+          // Use native http.request for better control
+          const proxyReq = http.request(target, {
+            method: 'GET',
+            timeout: 5000, // Explicit timeout 5s
+            headers: {
+              'User-Agent': 'GPU-Lab-Monitor-Proxy/1.0',
+              // Forward Accept header if present
+              'Accept': req.headers['accept'] || '*/*',
+            }
+          }, (proxyRes) => {
             res.statusCode = proxyRes.statusCode || 200;
-            res.setHeader('Content-Type', proxyRes.headers['content-type'] || 'application/json');
+            
+            // Forward headers
+            for (const [key, value] of Object.entries(proxyRes.headers)) {
+               if (value) res.setHeader(key, value);
+            }
+            
+            // Ensure CORS on the proxy response
             res.setHeader('Access-Control-Allow-Origin', '*');
 
             // Pipe the data directly
@@ -140,9 +171,12 @@ export default defineConfig({
              proxyReq.destroy();
              if (!res.headersSent) {
                res.statusCode = 504;
+               res.setHeader('Content-Type', 'application/json');
                res.end(JSON.stringify({ status: 'error', message: 'Proxy timeout' }));
              }
           });
+
+          proxyReq.end();
         });
       }
     }

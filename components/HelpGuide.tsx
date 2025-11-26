@@ -1,5 +1,5 @@
 import React from 'react';
-import { Terminal, Settings, Save, Server, Shield, Globe, HelpCircle, AlertTriangle, PlayCircle } from 'lucide-react';
+import { Terminal, Server, Globe, HelpCircle, AlertTriangle } from 'lucide-react';
 
 const HelpGuide: React.FC<{onClose: () => void}> = ({ onClose }) => {
   return (

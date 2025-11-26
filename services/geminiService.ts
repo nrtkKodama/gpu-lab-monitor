@@ -3,6 +3,6 @@
 
 import { ServerNode } from "../types";
 
-export const analyzeClusterStatus = async (server: ServerNode): Promise<string> => {
+export const analyzeClusterStatus = async (_server: ServerNode): Promise<string> => {
   return "AI分析機能は現在無効化されています。";
 };
