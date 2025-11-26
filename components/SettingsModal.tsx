@@ -102,6 +102,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, servers,
       const originalIp = isLocalhost ? s.originalIp : s.ip;
 
       return {
+        id: s.id,
         name: s.name,
         ip: `localhost:${localPort}`,
         originalIp: originalIp,

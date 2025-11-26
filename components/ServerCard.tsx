@@ -5,8 +5,8 @@ import { Server, AlertTriangle, Cpu, Thermometer, Database, Layers, Edit2, Trash
 interface ServerCardProps {
   server: ServerNode;
   onClick: (server: ServerNode) => void;
-  onRemove: (ip: string) => void;
-  onRename: (ip: string, newName: string) => void;
+  onRemove: (id: string) => void;
+  onRename: (id: string, newName: string) => void;
 }
 
 const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove, onRename }) => {
@@ -14,14 +14,10 @@ const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove, onRe
   
   // Aggregate stats
   const totalGpus = server.gpus.length;
-  
-  // Define "Free" as utilization < 5%
   const freeGpus = isOnline ? server.gpus.filter(g => g.utilization.gpu < 5).length : 0;
-  
   const avgUtil = totalGpus > 0 
     ? Math.round(server.gpus.reduce((acc, gpu) => acc + gpu.utilization.gpu, 0) / totalGpus)
     : 0;
-    
   const maxTemp = totalGpus > 0
     ? Math.max(...server.gpus.map(g => g.temperature))
     : 0;
@@ -35,25 +31,19 @@ const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove, onRe
   const usedMemGB = totalMemMiB > 0 ? (usedMemMiB / 1024).toFixed(1) : '0';
   const memPercent = totalMemMiB > 0 ? Math.round((usedMemMiB / totalMemMiB) * 100) : 0;
   
-  // Card border color based on status
   const statusColor = !isOnline 
     ? 'bg-red-900/10 border-red-900/50' 
     : maxTemp > 80 
       ? 'bg-orange-900/10 border-orange-800/50' 
       : 'bg-gray-800 border-gray-700 hover:border-gray-500';
 
-  // Bar color based on memory usage
-  const memBarColor = memPercent > 90 
-    ? 'bg-red-500' 
-    : memPercent > 70 
-      ? 'bg-yellow-500' 
-      : 'bg-blue-500';
+  const memBarColor = memPercent > 90 ? 'bg-red-500' : memPercent > 70 ? 'bg-yellow-500' : 'bg-blue-500';
 
   const handleEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
     const newName = window.prompt("新しいサーバー名を入力してください:", server.name);
     if (newName && newName.trim() !== "") {
-      onRename(server.ip, newName.trim());
+      onRename(server.id, newName.trim());
     }
   };
 
@@ -98,18 +88,13 @@ const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove, onRe
               </span>
             </div>
 
-            {/* Progress Bar */}
             <div className="w-full bg-gray-700 h-2.5 rounded-full overflow-hidden">
-              <div 
-                className={`h-full transition-all duration-500 ease-out ${memBarColor}`} 
-                style={{ width: `${memPercent}%` }}
-              ></div>
+              <div className={`h-full transition-all duration-500 ease-out ${memBarColor}`} style={{ width: `${memPercent}%` }}></div>
             </div>
           </div>
 
           {/* Secondary Metrics Grid */}
           <div className="grid grid-cols-3 gap-2 text-xs">
-            {/* Available GPUs */}
             <div className="bg-gray-800/50 rounded p-2 flex flex-col justify-center items-center border border-gray-700/30">
                <span className="text-gray-500 flex items-center gap-1 mb-0.5"><Layers size={12}/> Free GPUs</span>
                <span className={`font-mono font-bold ${freeGpus > 0 ? 'text-green-400' : 'text-gray-500'}`}>
@@ -117,7 +102,6 @@ const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove, onRe
                </span>
             </div>
 
-            {/* Avg Load */}
             <div className="bg-gray-800/50 rounded p-2 flex flex-col justify-center items-center border border-gray-700/30">
                <span className="text-gray-500 flex items-center gap-1 mb-0.5"><Cpu size={12}/> Avg Load</span>
                <span className={`font-mono font-bold ${avgUtil > 80 ? 'text-orange-400' : 'text-gray-300'}`}>
@@ -125,7 +109,6 @@ const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove, onRe
                </span>
             </div>
 
-            {/* Peak Temp */}
             <div className="bg-gray-800/50 rounded p-2 flex flex-col justify-center items-center border border-gray-700/30">
                <span className="text-gray-500 flex items-center gap-1 mb-0.5"><Thermometer size={12}/> Peak Temp</span>
                <span className={`font-mono font-bold ${maxTemp > 80 ? 'text-red-400' : 'text-gray-300'}`}>
@@ -142,7 +125,7 @@ const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove, onRe
         </div>
       )}
 
-      {/* Action Buttons (Hover) */}
+      {/* Action Buttons */}
       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button 
           onClick={handleEdit}
@@ -152,7 +135,7 @@ const ServerCard: React.FC<ServerCardProps> = ({ server, onClick, onRemove, onRe
           <Edit2 size={14} />
         </button>
         <button 
-          onClick={(e) => { e.stopPropagation(); onRemove(server.ip); }}
+          onClick={(e) => { e.stopPropagation(); onRemove(server.id); }}
           className="p-1.5 hover:bg-red-500/20 rounded-md text-gray-600 hover:text-red-400 transition-colors"
           title="Remove Server"
         >

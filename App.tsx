@@ -5,7 +5,7 @@ import ServerCard from './components/ServerCard';
 import ServerDetail from './components/ServerDetail';
 import HelpGuide from './components/HelpGuide';
 import SettingsModal from './components/SettingsModal';
-import { LayoutDashboard, Plus, Network, HelpCircle, HardDrive, Search, Loader2, CheckCircle2, AlertTriangle, XCircle, Settings } from 'lucide-react';
+import { LayoutDashboard, Plus, Network, HelpCircle, HardDrive, Search, Loader2, CheckCircle2, AlertTriangle, Settings } from 'lucide-react';
 
 const App: React.FC = () => {
   // Persistence: Load servers from localStorage on boot
@@ -15,15 +15,27 @@ const App: React.FC = () => {
       if (!saved) return [];
       
       const parsed = JSON.parse(saved);
-      // Migration logic: convert old string[] to ServerConfig[]
-      if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'string') {
-        return parsed.map((ip: string, idx: number) => ({
-          name: `Node-${idx + 1}`,
-          ip: ip,
-          sshPort: 22
-        }));
+      // Migration logic: convert old string[] or old objects to ServerConfig[] with IDs
+      if (Array.isArray(parsed)) {
+        return parsed.map((item: any, idx: number) => {
+          // Handle old string format
+          if (typeof item === 'string') {
+            return {
+              id: `server-${Date.now()}-${idx}`,
+              name: `Node-${idx + 1}`,
+              ip: item,
+              sshPort: 22
+            };
+          }
+          // Handle old object format (missing id)
+          return {
+            ...item,
+            id: item.id || `server-${Date.now()}-${idx}`,
+            sshPort: item.sshPort || 22
+          };
+        });
       }
-      return parsed;
+      return [];
     } catch (e) {
       console.error("Failed to parse saved servers", e);
       return [];
@@ -66,7 +78,6 @@ const App: React.FC = () => {
   }, [savedServers]);
 
   const refreshAllData = async () => {
-    // Pass the full config object to support "Original IP -> Tunnel IP" fallback logic
     const promises = savedServers.map((config) => fetchServerData(config));
     const results = await Promise.all(promises);
     setServers(results);
@@ -98,36 +109,55 @@ const App: React.FC = () => {
 
   const handleAddServer = () => {
     if (newIp) {
-      // Check for duplicates
-      if (savedServers.some(s => s.ip === newIp)) {
-        alert("このIPアドレスは既に登録されています。");
+      const port = parseInt(newSshPort) || 22;
+      
+      // Check for duplicates: Allow same IP if port is different
+      const isDuplicate = savedServers.some(s => s.ip === newIp && s.sshPort === port);
+      
+      if (isDuplicate) {
+        alert("このサーバー（IPアドレスとポートの組み合わせ）は既に登録されています。");
         return;
       }
       
+      // Generate a unique ID
+      const newId = crypto.randomUUID ? crypto.randomUUID() : `server-${Date.now()}`;
+      
       const name = newName.trim() || `Server-${newIp.split('.').pop()}`;
-      const port = parseInt(newSshPort) || 22;
       
       setSavedServers([...savedServers, { 
+        id: newId,
         name, 
         ip: newIp,
-        originalIp: newIp, // Initialize originalIp with the input IP
+        originalIp: newIp, 
         sshPort: port
       }]);
       resetAddModal();
     }
   };
 
-  const handleRemoveServer = (ip: string) => {
-    if (confirm(`${ip} を監視リストから削除しますか？`)) {
-      setSavedServers(savedServers.filter(s => s.ip !== ip));
+  const handleRemoveServer = (id: string) => {
+    const target = savedServers.find(s => s.id === id);
+    if (target && confirm(`${target.name} (${target.ip}) を監視リストから削除しますか？`)) {
+      setSavedServers(savedServers.filter(s => s.id !== id));
+      setServers(servers.filter(s => s.id !== id)); // Clear from display immediately
     }
   };
 
-  const handleRenameServer = (ip: string, newName: string) => {
-    const updated = savedServers.map(s => 
-      s.ip === ip ? { ...s, name: newName } : s
-    );
-    setSavedServers(updated);
+  const handleRenameServer = (id: string, newName: string) => {
+    // Update Config State
+    setSavedServers(prev => prev.map(s => 
+      s.id === id ? { ...s, name: newName } : s
+    ));
+
+    // Update Display State Immediately (Sync)
+    setServers(prev => prev.map(s => 
+      s.id === id ? { ...s, name: newName } : s
+    ));
+    
+    // Update selected server if it's the one being renamed
+    if (selectedServer && selectedServer.id === id) {
+        setSelectedServer(prev => prev ? { ...prev, name: newName } : null);
+    }
   };
 
   const handleScanLan = async () => {
@@ -148,7 +178,8 @@ const App: React.FC = () => {
       
       if (uniqueNew.length > 0) {
         if (confirm(`${uniqueNew.length} 台の新しいデバイスが見つかりました。\n追加しますか？\n${uniqueNew.join(', ')}`)) {
-          const newConfigs = uniqueNew.map(ip => ({ 
+          const newConfigs = uniqueNew.map((ip, idx) => ({ 
+            id: `auto-${Date.now()}-${idx}`,
             name: `Auto-${ip.split('.').pop()}`, 
             ip,
             originalIp: ip,
@@ -157,7 +188,7 @@ const App: React.FC = () => {
           setSavedServers([...savedServers, ...newConfigs]);
         }
       } else {
-        alert(`スキャン完了: 範囲 ${prefix}.1 - 254\n新しいデバイスは見つかりませんでした。\n(VPN経由など遠隔地の場合は、個別にAdd Serverからテストしてください)`);
+        alert(`スキャン完了: 範囲 ${prefix}.1 - 254\n新しいデバイスは見つかりませんでした。`);
       }
     } catch (e) {
       console.error(e);
@@ -282,7 +313,15 @@ const App: React.FC = () => {
         isOpen={showSettingsModal}
         onClose={() => setShowSettingsModal(false)}
         servers={savedServers}
-        onImport={(imported) => setSavedServers(imported)}
+        onImport={(imported) => {
+             // Ensure IDs exist on imported data
+             const sanitized = imported.map((s, i) => ({
+                 ...s,
+                 id: s.id || `import-${Date.now()}-${i}`,
+                 sshPort: s.sshPort || 22
+             }));
+             setSavedServers(sanitized);
+        }}
       />
 
       {/* Scan Config Modal */}
@@ -312,9 +351,6 @@ const App: React.FC = () => {
                     .x
                   </span>
                 </div>
-                <p className="text-xs text-gray-500 mt-2 text-yellow-500/80">
-                  ※遠隔地やVPN経由のサーバーも検出できるよう、タイムアウトを長め(2000ms)に設定しています。
-                </p>
               </div>
             </div>
 

@@ -28,7 +28,7 @@ export interface GPUInfo {
 }
 
 export interface ServerNode {
-  id: string;
+  id: string; // Unique identifier (UUID)
   ip: string;
   name: string;
   status: 'online' | 'offline' | 'warning';
@@ -37,6 +37,7 @@ export interface ServerNode {
 }
 
 export interface ServerConfig {
+  id: string; // Unique identifier
   name: string;
   ip: string;
   originalIp?: string; // Stores the real remote IP if 'ip' is set to localhost (tunnel)
