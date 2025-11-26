@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import http from 'node:http';
 import { exec } from 'node:child_process';
+import process from 'node:process';
 
 export default defineConfig({
   plugins: [
@@ -101,9 +102,9 @@ export default defineConfig({
         });
 
         // =========================================
-        // 3. プロキシ API (既存機能)
+        // 3. プロキシ API (native http モジュール版)
         // =========================================
-        server.middlewares.use('/api/proxy', async (req, res, next) => {
+        server.middlewares.use('/api/proxy', (req, res, next) => {
           const urlObj = new URL(req.url || '', `http://${req.headers.host}`);
           const target = urlObj.searchParams.get('target');
 
@@ -112,25 +113,36 @@ export default defineConfig({
             return;
           }
 
-          try {
-            // Node.js 18+ global fetch
-            const response = await fetch(target);
-            const text = await response.text();
-
-            res.setHeader('Content-Type', 'application/json');
+          // Use native http.get instead of fetch for compatibility
+          const proxyReq = http.get(target, (proxyRes) => {
+            res.statusCode = proxyRes.statusCode || 200;
+            res.setHeader('Content-Type', proxyRes.headers['content-type'] || 'application/json');
             res.setHeader('Access-Control-Allow-Origin', '*');
-            res.statusCode = response.status;
-            res.end(text);
-          } catch (error) {
-            console.error(`[Proxy Error] Failed to fetch ${target}:`, error);
-            res.statusCode = 502;
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ 
-              status: 'error', 
-              message: 'Proxy failed to fetch data from target server.',
-              details: String(error)
-            }));
-          }
+
+            // Pipe the data directly
+            proxyRes.pipe(res);
+          });
+
+          proxyReq.on('error', (err) => {
+            console.error(`[Proxy Error] Failed to fetch ${target}:`, err.message);
+            if (!res.headersSent) {
+              res.statusCode = 502;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ 
+                status: 'error', 
+                message: 'Proxy failed to fetch data from target server.',
+                details: err.message
+              }));
+            }
+          });
+
+          proxyReq.on('timeout', () => {
+             proxyReq.destroy();
+             if (!res.headersSent) {
+               res.statusCode = 504;
+               res.end(JSON.stringify({ status: 'error', message: 'Proxy timeout' }));
+             }
+          });
         });
       }
     }

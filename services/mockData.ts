@@ -80,7 +80,10 @@ const fetchWithTimeout = async (url: string, timeoutMs: number) => {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, { 
+      signal: controller.signal,
+      headers: { 'Cache-Control': 'no-cache' } // Ensure fresh data
+    });
     clearTimeout(id);
     return res;
   } catch (e) {
@@ -96,9 +99,11 @@ const attemptFetchTarget = async (address: string, name: string): Promise<any> =
   const AGENT_PORT = 8000;
   let targetUrl = '';
   
-  if (address.startsWith('http')) {
-    targetUrl = `${address}/metrics`;
+  // Ensure protocol is present
+  if (address.startsWith('http://') || address.startsWith('https://')) {
+     targetUrl = address.endsWith('/metrics') ? address : `${address}/metrics`;
   } else {
+    // Basic IP/Hostname logic
     const hasPort = address.includes(':');
     if (hasPort) {
       targetUrl = `http://${address}/metrics`;
@@ -107,38 +112,32 @@ const attemptFetchTarget = async (address: string, name: string): Promise<any> =
     }
   }
 
-  // Check if we are running on a remote/public domain (e.g., ngrok)
-  const isLocalClient = window.location.hostname === 'localhost' || 
-                        window.location.hostname === '127.0.0.1' ||
-                        window.location.hostname.startsWith('192.168.');
-
-  // If we are external (ngrok), attempting to fetch private LAN IP directly will fail/timeout.
-  // Skip direct fetch to save time and go straight to proxy.
-  const shouldSkipDirect = !isLocalClient && 
-                           !address.includes('localhost') && 
-                           !address.includes('127.0.0.1') &&
-                           (address.startsWith('192.168.') || address.startsWith('172.') || address.startsWith('10.'));
-
-  // 1. Direct Fetch
-  if (!shouldSkipDirect) {
-    try {
-      const res = await fetchWithTimeout(targetUrl, 1500);
-      if (res.ok) {
-        const json = await res.json();
-        return json;
-      }
-    } catch (e) {
-      // Direct failed, proceed to proxy
+  // 1. Direct Fetch (Browser -> Agent)
+  // Note: May fail due to CORS Private Network Access even if Agent allows CORS
+  try {
+    const res = await fetchWithTimeout(targetUrl, 2000); // Increased from 1500
+    if (res.ok) {
+      const json = await res.json();
+      return json;
     }
+  } catch (e) {
+    // Log direct fetch failure for debugging (often CORS)
+    // console.warn(`Direct fetch failed for ${targetUrl}, trying proxy...`, e);
   }
 
-  // 2. Proxy Fetch (Fallback or Primary for remote access)
-  const proxyUrl = `/api/proxy?target=${encodeURIComponent(targetUrl)}`;
-  const res = await fetchWithTimeout(proxyUrl, 5000); 
-  if (!res.ok) {
-    throw new Error(`Proxy status: ${res.status}`);
+  // 2. Proxy Fetch (Browser -> Vite Node Server -> Agent)
+  // This bypasses Browser CORS restrictions
+  try {
+    const proxyUrl = `/api/proxy?target=${encodeURIComponent(targetUrl)}`;
+    const res = await fetchWithTimeout(proxyUrl, 10000); // Increased from 5000 to 10s
+    if (!res.ok) {
+      throw new Error(`Proxy status: ${res.status} ${res.statusText}`);
+    }
+    return await res.json();
+  } catch (e) {
+    console.error(`All fetch attempts failed for ${name} (${address})`, e);
+    throw e;
   }
-  return await res.json();
 };
 
 export const fetchRealServerData = async (config: ServerConfig): Promise<ServerNode> => {
@@ -156,21 +155,22 @@ export const fetchRealServerData = async (config: ServerConfig): Promise<ServerN
     if (config.originalIp) {
       try {
         const jsonData = await attemptFetchTarget(config.originalIp, config.name);
-        if (jsonData.status === 'online') {
-            return { ...baseNode, status: 'online', ip: config.originalIp, gpus: jsonData.gpus };
+        if (jsonData.status === 'online' || jsonData.gpus) {
+            return { ...baseNode, status: 'online', ip: config.originalIp, gpus: jsonData.gpus || [] };
         }
       } catch (e) {
         // Fallback to configured IP
       }
     }
 
-    // Priority 2: Try Configured IP (e.g. localhost tunnel)
+    // Priority 2: Try Configured IP (e.g. localhost tunnel or direct)
     const jsonData = await attemptFetchTarget(config.ip, config.name);
-    if (jsonData.status === 'online') {
-        return { ...baseNode, status: 'online', ip: config.ip, gpus: jsonData.gpus };
+    
+    // Check if valid data
+    if (jsonData && (jsonData.status === 'online' || Array.isArray(jsonData.gpus))) {
+        return { ...baseNode, status: 'online', ip: config.ip, gpus: jsonData.gpus || [] };
     }
     
-    // If we got here but status is not online (error in json)
     return baseNode;
   } catch (e) {
     return baseNode;
