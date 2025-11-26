@@ -36,12 +36,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, servers,
       if (remoteHost.includes(':')) remoteHost = remoteHost.split(':')[0];
 
       const localPort = START_PORT + idx;
+      const sshPort = s.sshPort || 22;
 
       return `Host ${hostAlias}
     HostName ${remoteHost}
     User ${sshUser}
+    Port ${sshPort}
     LocalForward ${localPort} localhost:8000
-    # Port 22
 `;
     }).join('\n');
   };
@@ -65,10 +66,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, servers,
         let remoteHost = s.originalIp || s.ip;
         if (remoteHost.includes(':')) remoteHost = remoteHost.split(':')[0];
         const localPort = START_PORT + idx;
+        const sshPort = s.sshPort || 22;
         
-        // Command: sshpass -p pass ssh -f -N -L local:localhost:8000 user@host -o StrictHostKeyChecking=no
-        lines.push(`sshpass -p "$SSH_PASS" ssh -f -N -L ${localPort}:localhost:8000 $SSH_USER@${remoteHost} -o StrictHostKeyChecking=no`);
-        lines.push(`echo "Started tunnel for ${s.name} (${remoteHost}) on port ${localPort}"`);
+        // Command: sshpass -p pass ssh -f -N -L local:localhost:8000 -p ssh_port user@host -o StrictHostKeyChecking=no
+        lines.push(`sshpass -p "$SSH_PASS" ssh -f -N -L ${localPort}:localhost:8000 -p ${sshPort} $SSH_USER@${remoteHost} -o StrictHostKeyChecking=no`);
+        lines.push(`echo "Started tunnel for ${s.name} (${remoteHost}:${sshPort}) on port ${localPort}"`);
     });
     
     lines.push("");
@@ -102,7 +104,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, servers,
       return {
         name: s.name,
         ip: `localhost:${localPort}`,
-        originalIp: originalIp
+        originalIp: originalIp,
+        sshPort: s.sshPort || 22
       };
     });
 

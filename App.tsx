@@ -19,7 +19,8 @@ const App: React.FC = () => {
       if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'string') {
         return parsed.map((ip: string, idx: number) => ({
           name: `Node-${idx + 1}`,
-          ip: ip
+          ip: ip,
+          sshPort: 22
         }));
       }
       return parsed;
@@ -41,6 +42,7 @@ const App: React.FC = () => {
   // Add Server Form State
   const [newIp, setNewIp] = useState('');
   const [newName, setNewName] = useState('');
+  const [newSshPort, setNewSshPort] = useState('22');
   const [showAddModal, setShowAddModal] = useState(false);
   
   // Settings State
@@ -79,6 +81,7 @@ const App: React.FC = () => {
   const resetAddModal = () => {
     setNewIp('');
     setNewName('');
+    setNewSshPort('22');
     setTestResult(null);
     setIsTesting(false);
     setShowAddModal(false);
@@ -102,7 +105,14 @@ const App: React.FC = () => {
       }
       
       const name = newName.trim() || `Server-${newIp.split('.').pop()}`;
-      setSavedServers([...savedServers, { name, ip: newIp }]);
+      const port = parseInt(newSshPort) || 22;
+      
+      setSavedServers([...savedServers, { 
+        name, 
+        ip: newIp,
+        originalIp: newIp, // Initialize originalIp with the input IP
+        sshPort: port
+      }]);
       resetAddModal();
     }
   };
@@ -138,7 +148,12 @@ const App: React.FC = () => {
       
       if (uniqueNew.length > 0) {
         if (confirm(`${uniqueNew.length} 台の新しいデバイスが見つかりました。\n追加しますか？\n${uniqueNew.join(', ')}`)) {
-          const newConfigs = uniqueNew.map(ip => ({ name: `Auto-${ip.split('.').pop()}`, ip }));
+          const newConfigs = uniqueNew.map(ip => ({ 
+            name: `Auto-${ip.split('.').pop()}`, 
+            ip,
+            originalIp: ip,
+            sshPort: 22
+          }));
           setSavedServers([...savedServers, ...newConfigs]);
         }
       } else {
@@ -340,22 +355,34 @@ const App: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm text-gray-400 mb-1">IP Address / Hostname</label>
+                <label className="block text-sm text-gray-400 mb-1">IP Address & SSH Port</label>
                 <div className="flex gap-2">
                   <input 
                     type="text" 
-                    placeholder="例: 192.168.1.50"
+                    placeholder="192.168.1.50"
                     className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 outline-none font-mono"
                     value={newIp}
                     onChange={(e) => setNewIp(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleAddServer()}
                   />
+                  <div className="w-24 relative">
+                    <span className="absolute left-2 top-2 text-gray-500 text-xs font-mono">Port</span>
+                    <input 
+                      type="number" 
+                      placeholder="22"
+                      className="w-full bg-gray-900 border border-gray-600 rounded-lg pl-10 pr-2 py-2 text-white focus:ring-2 focus:ring-blue-500 outline-none font-mono text-center"
+                      value={newSshPort}
+                      onChange={(e) => setNewSshPort(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="mt-2 text-right">
                   <button 
                     onClick={handleTestConnection}
                     disabled={!newIp || isTesting}
-                    className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm text-gray-200 border border-gray-600 disabled:opacity-50 whitespace-nowrap"
+                    className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs text-gray-200 border border-gray-600 disabled:opacity-50 whitespace-nowrap"
                   >
-                    {isTesting ? <Loader2 size={18} className="animate-spin"/> : "接続テスト"}
+                    {isTesting ? <Loader2 size={14} className="animate-spin inline mr-1"/> : null} 接続テスト (Agent)
                   </button>
                 </div>
               </div>

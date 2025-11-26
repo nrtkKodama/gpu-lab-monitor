@@ -117,6 +117,7 @@ const attemptFetchTarget = async (address: string, name: string): Promise<Server
 
   // 1. Direct Fetch
   try {
+    // Browser to Agent directly
     const res = await fetchWithTimeout(targetUrl, 1500);
     if (res.ok) {
       jsonData = await res.json();
@@ -128,6 +129,7 @@ const attemptFetchTarget = async (address: string, name: string): Promise<Server
   // 2. Proxy Fetch
   if (!jsonData) {
     try {
+      // Browser to Management Server (Proxy) to Agent
       const proxyUrl = `/api/proxy?target=${encodeURIComponent(targetUrl)}`;
       const res = await fetchWithTimeout(proxyUrl, 10000); // 10s timeout
       if (!res.ok) {

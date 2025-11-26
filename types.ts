@@ -40,6 +40,7 @@ export interface ServerConfig {
   name: string;
   ip: string;
   originalIp?: string; // Stores the real remote IP if 'ip' is set to localhost (tunnel)
+  sshPort?: number; // SSH Port (default 22)
 }
 
 export enum ViewState {
