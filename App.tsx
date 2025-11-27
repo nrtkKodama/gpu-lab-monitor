@@ -1,46 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { ServerNode, ViewState, ServerConfig } from './types';
-import { fetchServerData, scanLocalNetwork, testServerConnection } from './services/mockData';
+import { fetchServerData, scanLocalNetwork, testServerConnection, fetchServerConfig, saveServerConfig } from './services/mockData';
 import ServerCard from './components/ServerCard';
 import ServerDetail from './components/ServerDetail';
 import HelpGuide from './components/HelpGuide';
 import SettingsModal from './components/SettingsModal';
-import { LayoutDashboard, Plus, Network, HelpCircle, HardDrive, Search, Loader2, CheckCircle2, AlertTriangle, Settings } from 'lucide-react';
+import { LayoutDashboard, Plus, Network, HelpCircle, HardDrive, Search, Loader2, CheckCircle2, AlertTriangle, Settings, Cloud } from 'lucide-react';
 
 const App: React.FC = () => {
-  // Persistence: Load servers from localStorage on boot
-  const [savedServers, setSavedServers] = useState<ServerConfig[]>(() => {
-    try {
-      const saved = localStorage.getItem('gpu_lab_monitor_ips');
-      if (!saved) return [];
-      
-      const parsed = JSON.parse(saved);
-      // Migration logic: convert old string[] or old objects to ServerConfig[] with IDs
-      if (Array.isArray(parsed)) {
-        return parsed.map((item: any, idx: number) => {
-          // Handle old string format
-          if (typeof item === 'string') {
-            return {
-              id: `server-${Date.now()}-${idx}`,
-              name: `Node-${idx + 1}`,
-              ip: item,
-              sshPort: 22
-            };
-          }
-          // Handle old object format (missing id)
-          return {
-            ...item,
-            id: item.id || `server-${Date.now()}-${idx}`,
-            sshPort: item.sshPort || 22
-          };
-        });
-      }
-      return [];
-    } catch (e) {
-      console.error("Failed to parse saved servers", e);
-      return [];
-    }
-  });
+  // Config Persistence: Now loaded from API, not localStorage directly
+  const [savedServers, setSavedServers] = useState<ServerConfig[]>([]);
+  const [isConfigLoaded, setIsConfigLoaded] = useState(false);
 
   const [servers, setServers] = useState<ServerNode[]>([]);
   const [viewState, setViewState] = useState<ViewState>(ViewState.DASHBOARD);
@@ -64,18 +34,73 @@ const App: React.FC = () => {
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
 
-  // Effect to sync savedServers to localStorage
+  // Initial Load & Sync Logic
   useEffect(() => {
-    localStorage.setItem('gpu_lab_monitor_ips', JSON.stringify(savedServers));
-    refreshAllData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedServers]);
+    const initData = async () => {
+      // 1. Fetch config from server
+      const remoteConfig = await fetchServerConfig();
+      
+      // 2. Check for local data (migration path)
+      const localString = localStorage.getItem('gpu_lab_monitor_ips');
+      let localConfig: ServerConfig[] = [];
+      try {
+        if (localString) {
+          const parsed = JSON.parse(localString);
+           if (Array.isArray(parsed)) {
+            localConfig = parsed.map((item: any, idx: number) => {
+              if (typeof item === 'string') {
+                return { id: `migrated-${Date.now()}-${idx}`, name: `Node-${idx + 1}`, ip: item, sshPort: 22 };
+              }
+              return { ...item, id: item.id || `migrated-${Date.now()}-${idx}`, sshPort: item.sshPort || 22 };
+            });
+           }
+        }
+      } catch (e) {
+        console.error("Local storage migration error", e);
+      }
 
-  // Periodic refresh
+      // 3. Sync Strategy
+      if (remoteConfig.length === 0 && localConfig.length > 0) {
+        // Migration: Upload local data to server
+        console.log("Migrating local config to server...");
+        await saveServerConfig(localConfig);
+        setSavedServers(localConfig);
+      } else {
+        // Default: Use server data (it's the source of truth)
+        setSavedServers(remoteConfig);
+      }
+      setIsConfigLoaded(true);
+    };
+
+    initData();
+  }, []);
+
+  // Update server data whenever savedServers changes
   useEffect(() => {
-    const interval = setInterval(refreshAllData, 30000); // 30s auto refresh
+    if (isConfigLoaded) {
+      refreshAllData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedServers, isConfigLoaded]);
+
+  // Periodic refresh (also re-fetches config to sync with other users)
+  useEffect(() => {
+    if (!isConfigLoaded) return;
+
+    const interval = setInterval(async () => {
+       // Refresh config from backend to see if other users added servers
+       const remoteConfig = await fetchServerConfig();
+       // Only update state if JSON string representation differs to avoid unnecessary renders
+       if (JSON.stringify(remoteConfig) !== JSON.stringify(savedServers)) {
+           setSavedServers(remoteConfig);
+       } else {
+           // If config hasn't changed, just refresh the metrics
+           refreshAllData();
+       }
+    }, 10000); // 10s auto refresh and sync
+
     return () => clearInterval(interval);
-  }, [savedServers]);
+  }, [savedServers, isConfigLoaded]);
 
   const refreshAllData = async () => {
     const promises = savedServers.map((config) => fetchServerData(config));
@@ -87,6 +112,12 @@ const App: React.FC = () => {
       const updated = results.find(s => s.id === selectedServer.id);
       if (updated) setSelectedServer(updated);
     }
+  };
+
+  // Helper to update state and persist to backend
+  const updateServersList = async (newConfig: ServerConfig[]) => {
+    setSavedServers(newConfig); // Optimistic update
+    await saveServerConfig(newConfig); // Persist
   };
 
   const resetAddModal = () => {
@@ -107,52 +138,46 @@ const App: React.FC = () => {
     setIsTesting(false);
   };
 
-  const handleAddServer = () => {
+  const handleAddServer = async () => {
     if (newIp) {
       const port = parseInt(newSshPort) || 22;
       
-      // Check for duplicates: Allow same IP if port is different
       const isDuplicate = savedServers.some(s => s.ip === newIp && s.sshPort === port);
-      
       if (isDuplicate) {
         alert("このサーバー（IPアドレスとポートの組み合わせ）は既に登録されています。");
         return;
       }
       
-      // Generate a unique ID
       const newId = crypto.randomUUID ? crypto.randomUUID() : `server-${Date.now()}`;
-      
       const name = newName.trim() || `Server-${newIp.split('.').pop()}`;
       
-      setSavedServers([...savedServers, { 
+      const newConfig = [...savedServers, { 
         id: newId,
         name, 
         ip: newIp,
         originalIp: newIp, 
         sshPort: port
-      }]);
+      }];
+
+      await updateServersList(newConfig);
       resetAddModal();
     }
   };
 
-  const handleRemoveServer = (id: string) => {
+  const handleRemoveServer = async (id: string) => {
     const target = savedServers.find(s => s.id === id);
-    if (target && confirm(`${target.name} (${target.ip}) を監視リストから削除しますか？`)) {
-      setSavedServers(savedServers.filter(s => s.id !== id));
+    if (target && confirm(`${target.name} (${target.ip}) を監視リストから削除しますか？\n(この操作は全ユーザーに反映されます)`)) {
+      const newConfig = savedServers.filter(s => s.id !== id);
+      await updateServersList(newConfig);
       setServers(servers.filter(s => s.id !== id)); // Clear from display immediately
     }
   };
 
-  const handleRenameServer = (id: string, newName: string) => {
-    // Update Config State
-    setSavedServers(prev => prev.map(s => 
+  const handleRenameServer = async (id: string, newName: string) => {
+    const newConfig = savedServers.map(s => 
       s.id === id ? { ...s, name: newName } : s
-    ));
-
-    // Update Display State Immediately (Sync)
-    setServers(prev => prev.map(s => 
-      s.id === id ? { ...s, name: newName } : s
-    ));
+    );
+    await updateServersList(newConfig);
     
     // Update selected server if it's the one being renamed
     if (selectedServer && selectedServer.id === id) {
@@ -164,7 +189,6 @@ const App: React.FC = () => {
     setShowScanModal(false);
     setIsScanning(true);
     try {
-      // User specified prefix check
       const prefix = scanPrefix.trim();
       if (!prefix.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
         alert("IPプレフィックスの形式が正しくありません。\n例: 192.168.1");
@@ -185,7 +209,7 @@ const App: React.FC = () => {
             originalIp: ip,
             sshPort: 22
           }));
-          setSavedServers([...savedServers, ...newConfigs]);
+          await updateServersList([...savedServers, ...newConfigs]);
         }
       } else {
         alert(`スキャン完了: 範囲 ${prefix}.1 - 254\n新しいデバイスは見つかりませんでした。`);
@@ -197,6 +221,15 @@ const App: React.FC = () => {
       setIsScanning(false);
     }
   };
+
+  if (!isConfigLoaded) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center text-gray-400">
+        <Loader2 size={48} className="animate-spin mb-4 text-blue-500" />
+        <p>Loading configuration from server...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 font-sans">
@@ -213,6 +246,9 @@ const App: React.FC = () => {
               </h1>
             </div>
             <div className="flex items-center gap-4">
+              <div className="hidden md:flex items-center gap-1 text-xs text-green-500 bg-green-900/20 px-2 py-1 rounded border border-green-800/50">
+                  <Cloud size={12}/> Connected
+              </div>
               <button 
                 onClick={() => setShowSettingsModal(true)}
                 className="text-gray-400 hover:text-white transition-colors flex items-center gap-1 text-sm"
@@ -320,7 +356,7 @@ const App: React.FC = () => {
                  id: s.id || `import-${Date.now()}-${i}`,
                  sshPort: s.sshPort || 22
              }));
-             setSavedServers(sanitized);
+             updateServersList(sanitized); // Save to server immediately
         }}
       />
 

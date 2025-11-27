@@ -1,0 +1,65 @@
+[
+  {
+    "id": "auto-1764204352968-0",
+    "name": "Typhoon",
+    "ip": "localhost:18001",
+    "originalIp": "192.168.31.100",
+    "sshPort": 22
+  },
+  {
+    "id": "auto-1764204352968-1",
+    "name": "Graveler",
+    "ip": "localhost:18002",
+    "originalIp": "192.168.31.110",
+    "sshPort": 22
+  },
+  {
+    "id": "auto-1764204352968-2",
+    "name": "Zekrom",
+    "ip": "localhost:18003",
+    "originalIp": "192.168.31.120",
+    "sshPort": 22
+  },
+  {
+    "id": "auto-1764204352968-3",
+    "name": "BigMouse",
+    "ip": "localhost:18004",
+    "originalIp": "192.168.31.142",
+    "sshPort": 22
+  },
+  {
+    "id": "auto-1764204352968-4",
+    "name": "DL-BOX",
+    "ip": "localhost:18005",
+    "originalIp": "192.168.31.150",
+    "sshPort": 22
+  },
+  {
+    "id": "54881fab-d7eb-477b-9597-9c26faf18098",
+    "name": "Raijin",
+    "ip": "localhost:18006",
+    "originalIp": "133.34.30.196",
+    "sshPort": 22
+  },
+  {
+    "id": "c5c1255d-a77c-4484-92a7-c421639bec8f",
+    "name": "Cervo",
+    "ip": "localhost:18007",
+    "originalIp": "133.34.30.196",
+    "sshPort": 222
+  },
+  {
+    "id": "4dfd1c8d-e18f-4e56-b105-27be9c931102",
+    "name": "Rotom",
+    "ip": "localhost:18008",
+    "originalIp": "133.34.30.196",
+    "sshPort": 322
+  },
+  {
+    "id": "8eab47f0-9424-4171-94d1-2e7529e77742",
+    "name": "Chatot",
+    "ip": "localhost:18009",
+    "originalIp": "133.34.30.199",
+    "sshPort": 22
+  }
+]

@@ -17,13 +17,13 @@ sshpass -p "$SSH_PASS" ssh -f -N -L 18004:localhost:8000 -p 22 $SSH_USER@192.168
 echo "Started tunnel for BigMouse (192.168.31.142:22) on port 18004"
 sshpass -p "$SSH_PASS" ssh -f -N -L 18005:localhost:8000 -p 22 $SSH_USER@192.168.31.150 -o StrictHostKeyChecking=no
 echo "Started tunnel for DL-BOX (192.168.31.150:22) on port 18005"
-sshpass -p "$SSH_PASS" ssh -f -N -L 18006:localhost:8000 -p 22 $SSH_USER@133.34.30.199 -o StrictHostKeyChecking=no
-echo "Started tunnel for Chatot (133.34.30.199:22) on port 18006"
-sshpass -p "$SSH_PASS" ssh -f -N -L 18007:localhost:8000 -p 22 $SSH_USER@133.34.30.196 -o StrictHostKeyChecking=no
-echo "Started tunnel for Raijin (133.34.30.196:22) on port 18007"
-sshpass -p "$SSH_PASS" ssh -f -N -L 18008:localhost:8000 -p 222 $SSH_USER@133.34.30.196 -o StrictHostKeyChecking=no
-echo "Started tunnel for Cervo (133.34.30.196:222) on port 18008"
-sshpass -p "$SSH_PASS" ssh -f -N -L 18009:localhost:8000 -p 322 $SSH_USER@133.34.30.196 -o StrictHostKeyChecking=no
-echo "Started tunnel for Rotom (133.34.30.196:322) on port 18009"
+sshpass -p "$SSH_PASS" ssh -f -N -L 18006:localhost:8000 -p 22 $SSH_USER@133.34.30.196 -o StrictHostKeyChecking=no
+echo "Started tunnel for Raijin (133.34.30.196:22) on port 18006"
+sshpass -p "$SSH_PASS" ssh -f -N -L 18007:localhost:8000 -p 222 $SSH_USER@133.34.30.196 -o StrictHostKeyChecking=no
+echo "Started tunnel for Cervo (133.34.30.196:222) on port 18007"
+sshpass -p "$SSH_PASS" ssh -f -N -L 18008:localhost:8000 -p 322 $SSH_USER@133.34.30.196 -o StrictHostKeyChecking=no
+echo "Started tunnel for Rotom (133.34.30.196:322) on port 18008"
+sshpass -p "$SSH_PASS" ssh -f -N -L 18009:localhost:8000 -p 22 $SSH_USER@133.34.30.199 -o StrictHostKeyChecking=no
+echo "Started tunnel for Chatot (133.34.30.199:22) on port 18009"
 
 echo 'All tunnels started.'

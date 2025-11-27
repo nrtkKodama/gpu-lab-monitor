@@ -8,6 +8,51 @@ import { ServerNode, GPUInfo, ServerConfig } from '../types';
 // false: 実際のサーバー(Python Agent)と通信
 const USE_MOCK_MODE = false;
 
+// BACKEND API CONFIG
+// GitHub Pagesなど、フロントエンドとバックエンドが別ドメインにある場合に使用
+let BACKEND_BASE_URL = localStorage.getItem('backend_api_url') || '';
+
+// 末尾のスラッシュを削除
+if (BACKEND_BASE_URL.endsWith('/')) {
+    BACKEND_BASE_URL = BACKEND_BASE_URL.slice(0, -1);
+}
+
+export const setBackendUrl = (url: string) => {
+    BACKEND_BASE_URL = url.endsWith('/') ? url.slice(0, -1) : url;
+    localStorage.setItem('backend_api_url', BACKEND_BASE_URL);
+};
+
+export const getBackendUrl = () => BACKEND_BASE_URL;
+
+// ==========================================
+// PERSISTENCE API (SHARED CONFIG)
+// ==========================================
+
+export const fetchServerConfig = async (): Promise<ServerConfig[]> => {
+  try {
+    const res = await fetch(`${BACKEND_BASE_URL}/api/servers`);
+    if (!res.ok) throw new Error('Failed to fetch server config');
+    return await res.json();
+  } catch (e) {
+    console.error("Config fetch failed:", e);
+    return [];
+  }
+};
+
+export const saveServerConfig = async (servers: ServerConfig[]): Promise<boolean> => {
+  try {
+    const res = await fetch(`${BACKEND_BASE_URL}/api/servers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(servers)
+    });
+    return res.ok;
+  } catch (e) {
+    console.error("Config save failed:", e);
+    return false;
+  }
+};
+
 // ==========================================
 // MOCK DATA GENERATOR
 // ==========================================
@@ -114,25 +159,23 @@ const attemptFetchTarget = async (rawAddress: string, name: string): Promise<any
   }
 
   // 1. Direct Fetch (Browser -> Agent)
-  // Note: May fail due to CORS Private Network Access even if Agent allows CORS
+  // This usually fails on GitHub Pages (HTTPS) -> Agent (HTTP) due to Mixed Content
   try {
-    const res = await fetchWithTimeout(targetUrl, 2000); // Increased from 1500
+    const res = await fetchWithTimeout(targetUrl, 2000); 
     if (res.ok) {
       const json = await res.json();
       return json;
     }
   } catch (e) {
-    // Log direct fetch failure for debugging (often CORS)
-    // console.warn(`Direct fetch failed for ${targetUrl}, trying proxy...`, e);
+    // Ignore direct fetch errors
   }
 
-  // 2. Proxy Fetch (Browser -> Vite Node Server -> Agent)
-  // This bypasses Browser CORS restrictions
+  // 2. Proxy Fetch (Browser -> Node Server -> Agent)
+  // Uses BACKEND_BASE_URL if set (for remote access via GitHub Pages)
   try {
-    const proxyUrl = `/api/proxy?target=${encodeURIComponent(targetUrl)}`;
-    const res = await fetchWithTimeout(proxyUrl, 10000); // Increased from 5000 to 10s
+    const proxyPath = `${BACKEND_BASE_URL}/api/proxy?target=${encodeURIComponent(targetUrl)}`;
+    const res = await fetchWithTimeout(proxyPath, 10000); 
     if (!res.ok) {
-      // Try to read error body if available
       const text = await res.text().catch(() => "");
       throw new Error(`Proxy status: ${res.status} ${res.statusText} ${text}`);
     }
@@ -186,7 +229,7 @@ export const testServerConnection = async (ip: string) => {
   const hostOnly = cleanIp.split(':')[0];
   
   try {
-    const res = await fetch(`/api/sys-ping?target=${hostOnly}`);
+    const res = await fetch(`${BACKEND_BASE_URL}/api/sys-ping?target=${hostOnly}`);
     if (res.ok) {
       const data = await res.json();
       pingOk = data.reachable;
@@ -220,7 +263,7 @@ export const testServerConnection = async (ip: string) => {
 export const scanLocalNetwork = async (subnetPrefix: string): Promise<string[]> => {
   console.log(`Starting fast server-side scan for ${subnetPrefix}.x ...`);
   try {
-    const res = await fetch(`/api/scan?subnet=${subnetPrefix}`);
+    const res = await fetch(`${BACKEND_BASE_URL}/api/scan?subnet=${subnetPrefix}`);
     if (!res.ok) throw new Error(`Scan API error: ${res.status}`);
     return await res.json();
   } catch (e) {
