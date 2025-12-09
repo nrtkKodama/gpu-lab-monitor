@@ -47,6 +47,7 @@ cat << 'EOF' > "$APP_DIR/monitor.py"
 import subprocess
 import csv
 import io
+import json
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,12 +55,13 @@ from typing import List, Dict, Any
 
 app = FastAPI()
 
-# CORS設定: 互換性のため allow_private_network は除外
+# CORS設定: ブラウザや管理サーバーからのアクセスを許可
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_private_network=True,
 )
 
 def safe_float(value: Any) -> float:
@@ -75,35 +77,97 @@ def safe_int(value: Any) -> int:
         return 0
 
 def get_docker_owner(pid: str) -> Dict[str, str]:
-    """PIDからDockerコンテナの所有者と名前を特定する"""
+    """
+    PIDからDockerコンテナの所有者と名前を特定する
+    環境変数、ラベル、ホストプロセス所有者などを複合的にチェックして「真のユーザー」を探します。
+    """
+    # 0. ホストOS上のプロセス所有者を取得 (フォールバックとして有用)
+    host_user = "unknown"
     try:
-        with open(f"/proc/{pid}/cgroup", "r") as f:
-            cgroup_content = f.read()
-            
-        container_id = None
-        for line in cgroup_content.splitlines():
-            if "docker" in line:
-                parts = line.split("/")
-                if len(parts) > 0:
-                    container_id = parts[-1]
-                    break
-        
-        if not container_id:
-            return {"user": "system", "container": ""}
+        # ps -o user= -p PID
+        proc = subprocess.run(["ps", "-o", "user=", "-p", str(pid)], capture_output=True, text=True)
+        if proc.returncode == 0:
+            host_user = proc.stdout.strip()
+    except:
+        pass
 
-        result = subprocess.run(
-            ["docker", "inspect", "--format", "{{.Name}}|{{.Config.User}}", container_id],
-            capture_output=True, text=True
-        )
+    try:
+        # 1. cgroupからコンテナIDを取得
+        container_id = None
+        with open(f"/proc/{pid}/cgroup", "r") as f:
+            for line in f:
+                if "docker" in line or "kubepods" in line:
+                    parts = line.strip().split("/")
+                    if parts:
+                        cid = parts[-1]
+                        # systemd scopeやdocker-プレフィックスの除去
+                        if cid.endswith(".scope"): cid = cid[:-6]
+                        if cid.startswith("docker-"): cid = cid[7:]
+                        
+                        if len(cid) >= 12:
+                            container_id = cid
+                            break
         
-        if result.returncode == 0:
-            name, user = result.stdout.strip().split("|")
-            return {"user": user or "root", "container": name.lstrip("/")}
+        # コンテナでない場合、ホストユーザーを返す
+        if not container_id:
+            return {"user": host_user if host_user != "unknown" else "system", "container": ""}
+
+        # 2. docker inspectで詳細メタデータを取得
+        # Name, Config.User, Config.Env, Config.Labels を一括取得
+        cmd = ["docker", "inspect", "--format", "{{json .}}", container_id]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            return {"user": host_user, "container": "unknown-container"}
+            
+        data = json.loads(result.stdout)
+        
+        name = data.get("Name", "").lstrip("/")
+        config = data.get("Config", {})
+        labels = config.get("Labels", {}) or {}
+        env_list = config.get("Env", []) or []
+        config_user = config.get("User", "")
+
+        # --- ヒューリスティック 1: 環境変数 (研究室でよく使われる変数を優先) ---
+        env_map = {}
+        for e in env_list:
+            if "=" in e:
+                k, v = e.split("=", 1)
+                env_map[k] = v
+        
+        # チェックする環境変数の優先順位
+        target_envs = ["JUPYTERHUB_USER", "NB_USER", "SUDO_USER", "USER", "USERNAME", "OWNER"]
+        for key in target_envs:
+            if key in env_map:
+                val = env_map[key]
+                # デフォルト値っぽいものは無視
+                if val and val not in ["root", "jovyan", "ubuntu", "1000", "node"]:
+                    return {"user": val, "container": name}
+
+        # --- ヒューリスティック 2: Docker Labels ---
+        # docker-composeのプロジェクト名はユーザー名であることが多い
+        if "com.docker.compose.project" in labels:
+            return {"user": labels["com.docker.compose.project"], "container": name}
+        if "maintainer" in labels:
+            return {"user": labels["maintainer"], "container": name}
+        if "user" in labels:
+            return {"user": labels["user"], "container": name}
+
+        # --- ヒューリスティック 3: ホストプロセスの所有者 ---
+        # root以外のユーザーがコンテナを起動している場合、それが最も正確
+        if host_user not in ["root", "dockremap", "unknown"]:
+            return {"user": host_user, "container": name}
+
+        # --- ヒューリスティック 4: Config User (フォールバック) ---
+        if config_user and config_user not in ["root", "0", "1000", "jovyan"]:
+            return {"user": config_user, "container": name}
+
+        # 最終手段
+        return {"user": "system", "container": name}
             
     except Exception:
-        pass
-        
-    return {"user": "system", "container": ""}
+        # エラー時はホストユーザーを返す
+        return {"user": host_user if host_user != "unknown" else "system", "container": ""}
 
 @app.get("/")
 def root():
@@ -112,6 +176,7 @@ def root():
 @app.get("/metrics")
 def get_metrics():
     try:
+        # nvidia-smiでGPU情報をCSV形式で取得
         cmd = [
             "nvidia-smi", 
             "--query-gpu=index,name,utilization.gpu,utilization.memory,memory.total,memory.used,memory.free,temperature.gpu,power.draw,power.limit", 
@@ -129,6 +194,7 @@ def get_metrics():
             if len(row) < 10: continue
             index = safe_int(row[0])
             
+            # 各GPUで実行中のプロセス情報を取得
             proc_cmd = [
                 "nvidia-smi", 
                 "--query-compute-apps=gpu_uuid,pid,process_name,used_memory", 
@@ -143,6 +209,7 @@ def get_metrics():
                 for p_row in proc_reader:
                     if len(p_row) < 4: continue
                     pid = p_row[1].strip()
+                    # Docker情報の特定を試みる (高精度版)
                     docker_info = get_docker_owner(pid)
                     
                     processes.append({
@@ -180,8 +247,6 @@ def get_metrics():
         return {"status": "error", "message": str(e), "gpus": []}
 
 if __name__ == "__main__":
-    # 仮想環境内であれば uvicorn はそのまま呼び出せるが
-    # スクリプト直接実行時はライブラリ呼び出しになる
     uvicorn.run(app, host="0.0.0.0", port=8000)
 EOF
 

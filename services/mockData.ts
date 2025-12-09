@@ -59,8 +59,12 @@ export const saveServerConfig = async (servers: ServerConfig[]): Promise<boolean
 
 const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1) + min);
 
-const USERS = ['tanaka', 'suzuki', 'sato', 'research_group_a', 'matsumoto'];
-const CONTAINERS = ['pytorch_training_v1', 'llm_finetune', 'stable_diffusion_inf', 'jupyter_lab_cuda11'];
+// Realistic user names found in research labs (Env vars: JUPYTERHUB_USER, USER etc.)
+const USERS = [
+  'tanaka', 'suzuki', 'sato', 'matsumoto', 
+  'lab_member_a', 'guest_researcher', 'jupyter-hama', 'u_12345678'
+];
+const CONTAINERS = ['pytorch_training_v1', 'llm_finetune', 'stable_diffusion_inf', 'jupyter_lab_cuda11', 'vscode-server'];
 const GPU_NAMES = ['NVIDIA A100-SXM4-40GB', 'NVIDIA GeForce RTX 3090', 'NVIDIA RTX A6000'];
 
 const generateProcess = (_gpuIndex: number) => {
