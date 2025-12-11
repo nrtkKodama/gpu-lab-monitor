@@ -11,37 +11,56 @@ APP_DIR="/opt/gpu-monitor"
 VENV_DIR="$APP_DIR/venv"
 
 echo "=========================================="
-echo "🚀 GPU Lab Monitor エージェントセットアップ (強制実行版)"
+echo "🚀 GPU Lab Monitor 修復＆セットアップ"
 echo "=========================================="
 
-# 1. システムパッケージのインストール
-echo "📦 [1/6] 必要なシステムパッケージをインストール中..."
+# ---------------------------------------------------------
+# 【修復ステップ】ミラーサーバーの変更とリスト更新
+# ---------------------------------------------------------
+echo "🔧 [0/6] パッケージソースの修復中..."
 
-# 【修正点】apt-get update が失敗しても(|| true) 無視して次に進む設定に変更
-apt-get update -qq || true 
+# 日本のサーバー(jp.archive)の調子が悪いようなので、メインサーバー(archive)に書き換えます
+if grep -q "jp.archive.ubuntu.com" /etc/apt/sources.list; then
+    echo "   -> ミラーサーバーをメインサーバー(archive.ubuntu.com)に切り替えます..."
+    sed -i 's/jp.archive.ubuntu.com/archive.ubuntu.com/g' /etc/apt/sources.list
+fi
 
-# パッケージインストール
-apt-get install -y -qq python3 python3-pip python3-venv
+# 古いキャッシュをクリア
+apt-get clean
 
-# 2. ディレクトリ作成
-echo "📂 [2/6] アプリケーションディレクトリを作成中 ($APP_DIR)..."
+echo "📦 [1/6] パッケージリストを更新中 (これには数分かかる場合があります)..."
+# 重要な更新コマンド。失敗したら止まるように設定。
+apt-get update
+
+# ---------------------------------------------------------
+# 以下、通常のインストール手順
+# ---------------------------------------------------------
+
+echo "⬇️  [2/6] 必要なパッケージをインストール中..."
+# 依存関係が壊れている場合に備えて fix-broken を実行
+apt-get install -f -y
+# 必要なパッケージをインストール
+apt-get install -y python3 python3-pip python3-venv
+
+# ディレクトリ作成
+echo "📂 [3/6] アプリケーションディレクトリを作成中 ($APP_DIR)..."
 mkdir -p "$APP_DIR"
 
-# 3. 仮想環境(venv)の作成
-echo "🐍 [3/6] Python仮想環境を作成中..."
+# 仮想環境(venv)の作成
+echo "🐍 [4/6] Python仮想環境を作成中..."
 if [ ! -d "$VENV_DIR" ]; then
     python3 -m venv "$VENV_DIR"
 else
     echo "   -> 既存の仮想環境を使用します"
 fi
 
-# 4. pipパッケージのインストール
-echo "⬇️  [4/6] ライブラリをインストール中 (FastAPI, Uvicorn)..."
+# pipパッケージのインストール
+echo "⬇️  [5/6] ライブラリをインストール中 (FastAPI, Uvicorn)..."
 "$VENV_DIR/bin/pip" install --upgrade pip -q
 "$VENV_DIR/bin/pip" install fastapi "uvicorn[standard]" -q
 
-# 5. monitor.py の作成 (CORS修正済み)
-echo "📝 [5/6] monitor.py を配置中..."
+# monitor.py の作成
+echo "📝 [6/6] monitor.py を配置中..."
 cat << 'EOF' > "$APP_DIR/monitor.py"
 import subprocess
 import csv
@@ -59,7 +78,6 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
-    # allow_private_network=True  <-- 削除済み
 )
 
 def safe_float(value: Any) -> float:
@@ -222,8 +240,8 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
 EOF
 
-# 6. Systemdサービスの作成
-echo "⚙️ [6/6] 自動起動設定を更新中..."
+# Systemdサービスの作成
+echo "⚙️  自動起動設定を更新中..."
 cat << EOF > /etc/systemd/system/gpu-monitor.service
 [Unit]
 Description=GPU Monitoring API Agent
@@ -248,5 +266,5 @@ if command -v ufw > /dev/null; then
     ufw allow 8000/tcp > /dev/null
 fi
 
-echo "✅ セットアップ完了（リポジトリエラーは無視しました）。"
+echo "✅ セットアップ完了（ミラーサーバーを archive.ubuntu.com に変更しました）。"
 echo "IPアドレス: $(hostname -I | awk '{print $1}')"
