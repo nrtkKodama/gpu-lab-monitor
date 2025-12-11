@@ -68,5 +68,12 @@
     "ip": "localhost:18010",
     "originalIp": "192.168.31.180",
     "sshPort": 22
+  },
+  {
+    "id": "a669fefc-be80-4159-a4fb-ffe9a60d08d3",
+    "name": "Reshiram",
+    "ip": "192.168.31.112",
+    "originalIp": "192.168.31.112",
+    "sshPort": 22
   }
 ]

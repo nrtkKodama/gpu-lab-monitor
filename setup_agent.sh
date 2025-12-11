@@ -11,39 +11,34 @@ APP_DIR="/opt/gpu-monitor"
 VENV_DIR="$APP_DIR/venv"
 
 echo "=========================================="
-echo "🚀 GPU Lab Monitor 修復＆セットアップ"
+echo "🚀 GPU Lab Monitor セットアップ (EOL対応版)"
 echo "=========================================="
 
 # ---------------------------------------------------------
-# 【修復ステップ】ミラーサーバーの変更とリスト更新
+# 【重要】EOL(サポート切れ)リポジトリへの切り替え処理
 # ---------------------------------------------------------
-echo "🔧 [0/6] パッケージソースの修復中..."
+echo "🔧 [0/6] リポジトリ参照先を old-releases に変更中..."
 
-# 日本のサーバー(jp.archive)の調子が悪いようなので、メインサーバー(archive)に書き換えます
-if grep -q "jp.archive.ubuntu.com" /etc/apt/sources.list; then
-    echo "   -> ミラーサーバーをメインサーバー(archive.ubuntu.com)に切り替えます..."
-    sed -i 's/jp.archive.ubuntu.com/archive.ubuntu.com/g' /etc/apt/sources.list
+# バックアップ作成
+if [ ! -f /etc/apt/sources.list.bak ]; then
+    cp /etc/apt/sources.list /etc/apt/sources.list.bak
 fi
 
-# 古いキャッシュをクリア
-apt-get clean
+# archive.ubuntu.com, jp.archive..., security.ubuntu.com を全て old-releases.ubuntu.com に置換
+sed -i -re 's/([a-z]{2}\.)?archive.ubuntu.com|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
 
-echo "📦 [1/6] パッケージリストを更新中 (これには数分かかる場合があります)..."
-# 重要な更新コマンド。失敗したら止まるように設定。
+echo "📦 [1/6] パッケージリストを更新中..."
 apt-get update
 
 # ---------------------------------------------------------
-# 以下、通常のインストール手順
+# 通常のインストール手順
 # ---------------------------------------------------------
 
 echo "⬇️  [2/6] 必要なパッケージをインストール中..."
-# 依存関係が壊れている場合に備えて fix-broken を実行
-apt-get install -f -y
-# 必要なパッケージをインストール
 apt-get install -y python3 python3-pip python3-venv
 
 # ディレクトリ作成
-echo "📂 [3/6] アプリケーションディレクトリを作成中 ($APP_DIR)..."
+echo "📂 [3/6] アプリケーションディレクトリを作成中..."
 mkdir -p "$APP_DIR"
 
 # 仮想環境(venv)の作成
@@ -55,7 +50,7 @@ else
 fi
 
 # pipパッケージのインストール
-echo "⬇️  [5/6] ライブラリをインストール中 (FastAPI, Uvicorn)..."
+echo "⬇️  [5/6] Pythonライブラリをインストール中..."
 "$VENV_DIR/bin/pip" install --upgrade pip -q
 "$VENV_DIR/bin/pip" install fastapi "uvicorn[standard]" -q
 
@@ -73,6 +68,7 @@ from typing import List, Dict, Any
 
 app = FastAPI()
 
+# 修正済み: allow_private_network を削除
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -241,7 +237,7 @@ if __name__ == "__main__":
 EOF
 
 # Systemdサービスの作成
-echo "⚙️  自動起動設定を更新中..."
+echo "⚙️ [6/6] 自動起動設定を更新中..."
 cat << EOF > /etc/systemd/system/gpu-monitor.service
 [Unit]
 Description=GPU Monitoring API Agent
@@ -257,7 +253,6 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 
-echo "   -> サービスを再起動中..."
 systemctl daemon-reload
 systemctl enable gpu-monitor
 systemctl restart gpu-monitor
@@ -266,5 +261,5 @@ if command -v ufw > /dev/null; then
     ufw allow 8000/tcp > /dev/null
 fi
 
-echo "✅ セットアップ完了（ミラーサーバーを archive.ubuntu.com に変更しました）。"
+echo "✅ セットアップ完了（old-releasesリポジトリへ切り替え済み）。"
 echo "IPアドレス: $(hostname -I | awk '{print $1}')"
