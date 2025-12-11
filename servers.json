@@ -35,6 +35,34 @@
     "sshPort": 22
   },
   {
+    "id": "c9abfb6b-38fb-4f5b-ba65-2b94419843fd",
+    "name": "Kyurem",
+    "ip": "localhost:18010",
+    "originalIp": "192.168.31.180",
+    "sshPort": 22
+  },
+  {
+    "id": "a669fefc-be80-4159-a4fb-ffe9a60d08d3",
+    "name": "Reshiram",
+    "ip": "192.168.31.112",
+    "originalIp": "192.168.31.112",
+    "sshPort": 22
+  },
+  {
+    "id": "bb38cc77-5903-4e13-93bf-327699f9c45b",
+    "name": "MLLM",
+    "ip": "192.168.31.140",
+    "originalIp": "192.168.31.140",
+    "sshPort": 22
+  },
+  {
+    "id": "cfac6297-d6b9-4add-89c5-72f065f81cfa",
+    "name": "LLM-01",
+    "ip": "192.168.31.160",
+    "originalIp": "192.168.31.160",
+    "sshPort": 22
+  },
+  {
     "id": "54881fab-d7eb-477b-9597-9c26faf18098",
     "name": "Raijin",
     "ip": "localhost:18006",
@@ -60,27 +88,6 @@
     "name": "Chatot",
     "ip": "localhost:18009",
     "originalIp": "133.34.30.199",
-    "sshPort": 22
-  },
-  {
-    "id": "c9abfb6b-38fb-4f5b-ba65-2b94419843fd",
-    "name": "Kyurem",
-    "ip": "localhost:18010",
-    "originalIp": "192.168.31.180",
-    "sshPort": 22
-  },
-  {
-    "id": "a669fefc-be80-4159-a4fb-ffe9a60d08d3",
-    "name": "Reshiram",
-    "ip": "192.168.31.112",
-    "originalIp": "192.168.31.112",
-    "sshPort": 22
-  },
-  {
-    "id": "bb38cc77-5903-4e13-93bf-327699f9c45b",
-    "name": "MLLM",
-    "ip": "192.168.31.140",
-    "originalIp": "192.168.31.140",
     "sshPort": 22
   }
 ]

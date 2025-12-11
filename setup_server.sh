@@ -3,6 +3,7 @@
 # 色の設定
 GREEN='\033[0;32m'
 RED='\033[0;31m'
+YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # サービス名
@@ -25,20 +26,94 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# 設定値の自動取得
-# SUDO_USER変数が空の場合はrootで実行されているとみなし、rootを使用（通常はsudo実行時の元のユーザーを取得）
+# ユーザーの決定
 REAL_USER=${SUDO_USER:-$USER}
 APP_DIR=$(pwd)
 
-# npmとnodeのパス解決 (NVM対応の強化)
-# まず元のユーザーとして npm/node のパスを探す（.bashrcなどを読み込ませるため -i は使わないが、whichで探す）
-# 注意: NVMの場合、sudo経由だとパスが見えないことがあるため、直接検索を試みる
+# ==========================================
+# 2. 初期装備（Node.js, npm）のチェックとインストール
+# ==========================================
+echo "1. 環境依存関係のチェック中..."
 
-# 1. sudo -u でユーザーのパスから探す試行
+# コマンドの存在確認関数
+check_command() {
+    if command -v "$1" >/dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# ユーザー環境またはシステム環境にNodeがあるか確認
+# NVMを使っているユーザーも考慮して、sudo -u でチェック
+USER_HAS_NODE=$(sudo -u ${REAL_USER} which node 2>/dev/null)
+SYSTEM_HAS_NODE=$(which node 2>/dev/null)
+
+if [ -z "$USER_HAS_NODE" ] && [ -z "$SYSTEM_HAS_NODE" ]; then
+    echo -e "${YELLOW}Node.js / npm が見つかりません。インストールを開始します...${NC}"
+    
+    # OS判定とインストール
+    if [ -f /etc/debian_version ]; then
+        # Debian/Ubuntu系
+        echo "Ubuntu/Debian系システムを検出しました。"
+        # curlがない場合は入れる
+        if ! check_command curl; then
+            apt-get update && apt-get install -y curl
+        fi
+        
+        # NodeSourceからLTS版(安定版)をインストール
+        echo "Node.js (LTS) のセットアップスクリプトを実行中..."
+        curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+        apt-get install -y nodejs
+
+    elif [ -f /etc/redhat-release ]; then
+        # CentOS/RHEL系
+        echo "CentOS/RHEL系システムを検出しました。"
+        if ! check_command curl; then
+            yum install -y curl
+        fi
+        
+        echo "Node.js (LTS) のセットアップスクリプトを実行中..."
+        curl -fsSL https://rpm.nodesource.com/setup_lts.x | bash -
+        yum install -y nodejs
+    else
+        echo -e "${RED}未対応のOSです。手動でNode.jsをインストールしてください。${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}Node.js と npm のインストールが完了しました。${NC}"
+else
+    echo -e "${GREEN}Node.js は既にインストールされています。${NC}"
+fi
+
+# ==========================================
+# 3. プロジェクト依存関係 (node_modules) のチェック
+# ==========================================
+echo "2. プロジェクトの依存パッケージをチェック中..."
+
+if [ ! -d "node_modules" ]; then
+    echo -e "${YELLOW}node_modules が見つかりません。npm install を実行します...${NC}"
+    # 権限エラーを防ぐため、所有者ユーザーとして実行
+    sudo -u ${REAL_USER} npm install
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}npm install 完了${NC}"
+    else
+        echo -e "${RED}npm install に失敗しました${NC}"
+        exit 1
+    fi
+else
+    echo -e "${GREEN}node_modules は存在します。スキップします。${NC}"
+fi
+
+# ==========================================
+# 4. パスの解決 (NVM対応強化版)
+# ==========================================
+
+# 再度パスを取得（新規インストールされた場合のため）
 USER_NODE_EXEC=$(sudo -u ${REAL_USER} which node 2>/dev/null)
 USER_NPM_EXEC=$(sudo -u ${REAL_USER} which npm 2>/dev/null)
 
-# 2. 見つからない場合、現在の環境(root)から探す
+# ユーザー環境で見つからない場合はシステムパス(root)を採用
 if [ -z "$USER_NODE_EXEC" ]; then
     USER_NODE_EXEC=$(which node)
 fi
@@ -46,23 +121,25 @@ if [ -z "$USER_NPM_EXEC" ]; then
     USER_NPM_EXEC=$(which npm)
 fi
 
+# それでも無い場合はエラー（インストール失敗など）
 if [ -z "$USER_NPM_EXEC" ]; then
-    echo -e "${RED}エラー: npm コマンドが見つかりません。Node.jsはインストールされていますか？${NC}"
+    echo -e "${RED}致命的エラー: npm コマンドへのパスが解決できませんでした。${NC}"
     exit 1
 fi
 
-# Nodeのバイナリがあるディレクトリを取得（ここをPATHに追加することでバージョン不整合を防ぐ）
 NODE_BIN_DIR=$(dirname "$USER_NODE_EXEC")
 
-echo -e "設定情報:"
+echo -e "\n設定情報:"
 echo -e "  ユーザー名: ${GREEN}${REAL_USER}${NC}"
 echo -e "  ディレクトリ: ${GREEN}${APP_DIR}${NC}"
 echo -e "  npmパス: ${GREEN}${USER_NPM_EXEC}${NC}"
-echo -e "  Nodeディレクトリ: ${GREEN}${NODE_BIN_DIR}${NC} (PATHに追加します)"
+echo -e "  Nodeディレクトリ: ${GREEN}${NODE_BIN_DIR}${NC}"
 echo ""
 
-# 2. サービスファイルの作成
-echo "1. サービスファイル (${SERVICE_FILE}) を作成中..."
+# ==========================================
+# 5. サービスファイルの作成
+# ==========================================
+echo "3. サービスファイル (${SERVICE_FILE}) を作成中..."
 
 cat <<EOF > ${SERVICE_FILE}
 [Unit]
@@ -99,28 +176,33 @@ else
     exit 1
 fi
 
-# 3. サービスの有効化と起動
-echo "2. Systemdのリロードとサービスの有効化..."
+# ==========================================
+# 6. サービスの有効化と起動
+# ==========================================
+echo "4. Systemdのリロードとサービスの有効化..."
 
 systemctl daemon-reload
 systemctl enable ${SERVICE_NAME}
 
-echo "3. サービスを再起動中..."
+echo "5. サービスを再起動中..."
 systemctl restart ${SERVICE_NAME}
 
-# 4. ステータスの確認
-echo "4. ステータスを確認します..."
-sleep 3 # 起動待ち時間を少し延長
+# ==========================================
+# 7. ステータスの確認
+# ==========================================
+echo "6. ステータスを確認します..."
+sleep 3 
 
 if systemctl is-active --quiet ${SERVICE_NAME}; then
     echo -e "${GREEN}成功！サービスは正常に稼働しています。${NC}"
     echo -e "ステータス詳細:"
     systemctl status ${SERVICE_NAME} --no-pager
     
-    # IPアドレスのヒント表示（簡易的）
+    # IPアドレスのヒント表示
     HOST_IP=$(hostname -I | awk '{print $1}')
     echo ""
     echo -e "ブラウザで確認してください: ${GREEN}http://localhost:3000${NC}"
+    echo -e "(または http://${HOST_IP}:3000)"
 else
     echo -e "${RED}警告: サービスの起動に失敗した可能性があります。${NC}"
     systemctl status ${SERVICE_NAME} --no-pager
