@@ -11,27 +11,40 @@ APP_DIR="/opt/gpu-monitor"
 VENV_DIR="$APP_DIR/venv"
 
 echo "=========================================="
-echo "🚀 GPU Lab Monitor セットアップ (EOL対応版)"
+echo "🚀 GPU Lab Monitor 最終修復セットアップ"
 echo "=========================================="
 
 # ---------------------------------------------------------
-# 【重要】EOL(サポート切れ)リポジトリへの切り替え処理
+# 【完全修復】すべての設定ファイルのリポジトリURLを置換
 # ---------------------------------------------------------
-echo "🔧 [0/6] リポジトリ参照先を old-releases に変更中..."
+echo "🔧 [0/6] 新旧すべての設定ファイルを old-releases に書き換えます..."
 
-# バックアップ作成
-if [ ! -f /etc/apt/sources.list.bak ]; then
-    cp /etc/apt/sources.list /etc/apt/sources.list.bak
+# 1. 新しい形式 (ubuntu.sources) の修正
+if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+    echo "   -> ubuntu.sources を修正中..."
+    sed -i 's/jp.archive.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list.d/ubuntu.sources
+    sed -i 's/archive.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list.d/ubuntu.sources
+    sed -i 's/security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list.d/ubuntu.sources
 fi
 
-# archive.ubuntu.com, jp.archive..., security.ubuntu.com を全て old-releases.ubuntu.com に置換
-sed -i -re 's/([a-z]{2}\.)?archive.ubuntu.com|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
+# 2. 古い形式 (sources.list) の修正 (念のため再実行)
+if [ -f /etc/apt/sources.list ]; then
+    echo "   -> sources.list を修正中..."
+    sed -i 's/jp.archive.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
+    sed -i 's/archive.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
+    sed -i 's/security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
+fi
+
+# 3. その他の .list ファイルも全て修正
+find /etc/apt/sources.list.d/ -name "*.list" -type f -exec sed -i 's/jp.archive.ubuntu.com/old-releases.ubuntu.com/g' {} + 2>/dev/null || true
+find /etc/apt/sources.list.d/ -name "*.list" -type f -exec sed -i 's/archive.ubuntu.com/old-releases.ubuntu.com/g' {} + 2>/dev/null || true
+find /etc/apt/sources.list.d/ -name "*.list" -type f -exec sed -i 's/security.ubuntu.com/old-releases.ubuntu.com/g' {} + 2>/dev/null || true
 
 echo "📦 [1/6] パッケージリストを更新中..."
 apt-get update
 
 # ---------------------------------------------------------
-# 通常のインストール手順
+# 以下、インストール手順
 # ---------------------------------------------------------
 
 echo "⬇️  [2/6] 必要なパッケージをインストール中..."
@@ -261,5 +274,5 @@ if command -v ufw > /dev/null; then
     ufw allow 8000/tcp > /dev/null
 fi
 
-echo "✅ セットアップ完了（old-releasesリポジトリへ切り替え済み）。"
+echo "✅ セットアップ完了（ubuntu.sources も含めて全て修正しました）。"
 echo "IPアドレス: $(hostname -I | awk '{print $1}')"
