@@ -61,7 +61,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_private_network=True,
+    # allow_private_network=True,
 )
 
 def safe_float(value: Any) -> float:
